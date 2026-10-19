@@ -192,3 +192,65 @@ test("an error deeper inside deploys leaves deploys on and the repository whole"
   assert.equal((await store.first("SELECT removed FROM repos WHERE id = 7")).removed, 0);
   assert.equal(await store.first("SELECT value FROM state WHERE key = 'deployments_note'"), null, "deploys still asked for");
 });
+
+test("GitHub giving up on a heavy snapshot (502): one repository at a time with smaller pages, so the backfill keeps moving", async () => {
+  const now = Date.parse("2026-10-19T10:00:00Z");
+  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", BACKFILL_DAYS: "7" });
+  const repos = [{ id: 7, name: "api" }, { id: 8, name: "web" }];
+  const node = (id, name, n) => ({ databaseId: id, nameWithOwner: `acme/${name}`, isArchived: false, isPrivate: true, pushedAt: "2026-10-19T09:00:00Z",
+    defaultBranchRef: { name: "main", target: { history: { pageInfo: { hasNextPage: false }, nodes: [
+      { oid: sha(n), message: `Work on ${name}`, authoredDate: "2026-10-19T08:00:00Z", additions: 1, deletions: 0, changedFilesIfAvailable: 1, author: { name: "Dana", user: { login: "dana" } }, associatedPullRequests: { nodes: [] } }] } } },
+    recent: { nodes: [] }, open: { totalCount: 0, nodes: [] }, deployments: { nodes: [] }, releases: { nodes: [] }, refs: { nodes: [] } });
+  const asked = [];
+  const fetch = fakeFetch([
+    ["/orgs/acme/repos", { body: repos.map((r) => ({ id: r.id, full_name: `acme/${r.name}`, default_branch: "main", private: true, archived: false, pushed_at: "2026-10-19T09:00:00Z" })) }],
+    ["/graphql", (u, init) => {
+      const { query, variables } = JSON.parse(init.body);
+      const many = (query.match(/: repository\(owner/g) ?? []).length;
+      asked.push({ many, first: /history\(first: (\d+)/.exec(query)?.[1] });
+      // Too heavy for GitHub: several repositories at once, or one with full pages.
+      if (many > 1 || /history\(first: 100/.test(query)) return { status: 502, body: { message: "error code: 502" } };
+      const r = repos.find((x) => x.name === variables.n0);
+      return { body: { data: { r0: node(r.id, r.name, r.id) } } };
+    }],
+    ["/events", { body: [] }],
+  ]);
+  const store = memStore();
+  const out = await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now);
+  assert.deepEqual(out.errors, []);
+  assert.equal((await store.first("SELECT COUNT(*) AS n FROM commits")).n, 2, "both repositories synced");
+  assert.equal((await store.first("SELECT COUNT(*) AS n FROM repos WHERE synced_at IS NOT NULL")).n, 2);
+  assert.deepEqual(asked.map((a) => a.many), [2, 1, 1], "the batch once, then each alone");
+  assert.deepEqual(asked.slice(1).map((a) => a.first), ["25", "25"], "with smaller pages");
+  // Remembered: the next run starts that way, without first waiting on the query GitHub cannot finish.
+  await store.run("UPDATE repos SET dirty = 1");
+  asked.length = 0;
+  const again = await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now + 120_000);
+  assert.deepEqual(again.errors, []);
+  assert.deepEqual(asked.map((x) => [x.many, x.first]), [[1, "25"], [1, "25"]]);
+});
+
+test("a page of older pull requests GitHub cannot give is asked again next run and never holds up the repository", async () => {
+  const now = Date.parse("2026-10-19T10:00:00Z");
+  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", BACKFILL_DAYS: "7" });
+  const pr = (n) => ({ number: n, title: `PR ${n}`, state: "OPEN", isDraft: false, merged: false, mergedAt: null, closedAt: null, createdAt: "2026-10-18T08:00:00Z",
+    updatedAt: new Date(Date.parse("2026-10-19T09:00:00Z") - n * 60_000).toISOString(), url: `https://github.com/acme/api/pull/${n}`, additions: 1, deletions: 0, changedFiles: 1,
+    headRefName: `f${n}`, baseRefName: "main", headRefOid: sha(100 + n), isCrossRepository: false, authorAssociation: "MEMBER", reviewDecision: null,
+    author: { login: "dana" }, labels: { nodes: [] }, commits: { nodes: [] } });
+  const node = { databaseId: 7, nameWithOwner: "acme/api", isArchived: false, isPrivate: true, pushedAt: "2026-10-19T09:00:00Z",
+    defaultBranchRef: { name: "main", target: { history: { pageInfo: { hasNextPage: false }, nodes: [] } } },
+    recent: { nodes: Array.from({ length: 30 }, (_, i) => pr(i + 1)) }, open: { totalCount: 0, nodes: [] }, deployments: { nodes: [] }, releases: { nodes: [] }, refs: { nodes: [] } };
+  const fetch = fakeFetch([
+    ["/orgs/acme/repos", { body: [{ id: 7, full_name: "acme/api", default_branch: "main", private: true, archived: false, pushed_at: "2026-10-19T09:00:00Z" }] }],
+    ["/graphql", (u, init) => (/pullRequests\(first: \d+, after:/.test(JSON.parse(init.body).query) ? { status: 502, body: { message: "error code: 502" } } : { body: { data: { r0: node } } })],
+    ["/events", { body: [] }],
+  ]);
+  const store = memStore();
+  const out = await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now);
+  assert.equal(out.errors.length, 1);
+  assert.match(out.errors[0], /older pull requests/);
+  const repo = await store.first("SELECT synced_at, prs_at FROM repos WHERE id = 7");
+  assert.ok(repo.synced_at, "the repository still synced");
+  assert.equal(repo.prs_at, null, "the older pages are asked for again next run");
+  assert.equal((await store.first("SELECT COUNT(*) AS n FROM prs")).n, 30);
+});

@@ -15,7 +15,7 @@
  * With hundreds of repositories this touches only the few that changed, so it stays far inside GitHub's limits.
  */
 import { chunks, getJson, getState, marks, setState, stateStmt } from "./db.js";
-import { OutOfBudget, RateLimited, nextPage } from "./github/client.js";
+import { GitHubError, OutOfBudget, RateLimited, nextPage } from "./github/client.js";
 import {
   SHA, branchOf, ciSql, commitFromGraph, commitFromRest, commitStmts, deployMarker, markerSql, prRow, prSql, pushId, pushSql,
   releaseMarker, repoSql, tagMarker,
@@ -23,6 +23,14 @@ import {
 import { commitStatsQuery, prPageQuery, reposQuery, snapshotQuery } from "./github/queries.js";
 
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
+/** A snapshot's page sizes: commits of the default branch, pull requests (recent and open). */
+const FULL = { history: 100, prs: 30 };
+const LIGHT = { history: 25, prs: 10 };
+/**
+ * GitHub answered that it gave up (a query too heavy to finish in its time), not that something is wrong: 502/503/504,
+ * or a 200 whose only content is GraphQL's "something went wrong … timeout".
+ */
+const gaveUp = (e) => e instanceof GitHubError && ([502, 503, 504].includes(Number(e.status)) || (Number(e.status) === 200 && /timeout|went wrong/i.test(String(e.message))));
 const ZERO = /^0{40}$/;
 
 /**
@@ -74,9 +82,21 @@ export async function runSync(ctx, now = Date.now()) {
     if (!late()) { try { await syncTeams(ctx, now); } catch (e) { fail("teams", e); } }
 
     const picks = await pickRepos(store, now);
-    for (const batch of chunks(picks, 5)) {
+    // GitHub gives up on a heavy query after about ten seconds (502/504), and the same batch would fail the same way
+    // every run: then one repository at a time with smaller pages, remembered for an hour so no run starts by waiting
+    // on a query that cannot finish.
+    const light = Number((await getState(store, "snapshot_light_until")) ?? 0) > now;
+    for (const batch of chunks(picks, light ? 1 : 5)) {
       if (late() || !gh.can("graphql")) break;
-      try { await snapshot(ctx, batch, now, out); } catch (e) { if (fail("snapshot", e)) break; }
+      try { await snapshot(ctx, batch, now, out, light ? LIGHT : FULL); }
+      catch (e) {
+        if (!gaveUp(e) || light) { if (fail("snapshot", e)) break; continue; }
+        await setState(store, "snapshot_light_until", String(now + HOUR), now);
+        for (const r of batch.filter((x) => !x.snapshotDone)) {
+          if (late() || !gh.can("graphql")) break;
+          try { await snapshot(ctx, [r], now, out, LIGHT); } catch (e2) { if (fail(`snapshot ${r.full_name}`, e2)) break; }
+        }
+      }
     }
     for (const r of picks.filter((x) => x.snapshotDone && x.changed)) {
       if (late() || !gh.can("core")) break;
@@ -171,7 +191,7 @@ async function pickRepos(store, now) {
 
 // ---------------------------------------------------------------------------------------------------- GraphQL snapshot
 
-async function snapshot(ctx, batch, now, out) {
+async function snapshot(ctx, batch, now, out, size = FULL) {
   const { store, cfg, gh } = ctx;
   const plan = batch.map((r) => {
     const [owner, name] = r.full_name.split("/");
@@ -184,12 +204,12 @@ async function snapshot(ctx, batch, now, out) {
   // snapshot asks without deploys, says so on the status, and tries with them again every 6 hours.
   const note = await store.first("SELECT value, updated_at FROM state WHERE key = 'deployments_note'");
   const noDeploys = !!note?.value && now - Number(note.updated_at) < 6 * HOUR;
-  const q = snapshotQuery(plan, { deployments: !noDeploys });
+  const q = snapshotQuery(plan, { deployments: !noDeploys, ...size });
   const { data, errors } = await gh.graphql(q.query, q.variables);
   // Only when the refused field took the whole repository with it: an error deeper inside deploys leaves the rest.
   if (!noDeploys && (errors ?? []).some((e) => Array.isArray(e?.path) && e.path.length === 2 && e.path[1] === "deployments" && e?.type !== "NOT_FOUND" && data?.[e.path[0]] == null)) {
     await setState(store, "deployments_note", "Deploys from GitHub need the Deployments: read permission", now);
-    return snapshot(ctx, batch, now, out);
+    return snapshot(ctx, batch, now, out, size);
   }
   if (!noDeploys && note?.value) await setState(store, "deployments_note", "", now);
   for (let i = 0; i < plan.length; i++) {
@@ -242,20 +262,30 @@ async function snapshot(ctx, batch, now, out) {
     const recent = node.recent?.nodes ?? [];
     const target = r.prs_at ? Number(r.prs_at) - HOUR : now - cfg.backfillDays * DAY;
     const oldest = Date.parse(recent.at(-1)?.updatedAt ?? "");
-    if (recent.length === 30 && oldest > target) await morePrs(ctx, r, target);
-    await store.run("UPDATE repos SET prs_at = ? WHERE id = ?", now, r.id);
+    // A page of older pull requests GitHub cannot give now is asked for again next run (prs_at stays), and never holds
+    // up the rest of this repository.
+    let prsComplete = true;
+    if (recent.length === size.prs && oldest > target) {
+      try { await morePrs(ctx, r, target, size.prs < FULL.prs ? 20 : 50); }
+      catch (e) {
+        if (e instanceof RateLimited || e instanceof OutOfBudget) throw e;
+        prsComplete = false;
+        out.errors.push(`${r.full_name} older pull requests: ${String(e?.message ?? e)}`.slice(0, 200));
+      }
+    }
+    if (prsComplete) await store.run("UPDATE repos SET prs_at = ? WHERE id = ?", now, r.id);
     r.snapshotDone = true;
   }
 }
 
 /** Pages of older pull requests (at most 4 per run; a cursor carries on next run). */
-async function morePrs(ctx, r, target) {
+async function morePrs(ctx, r, target, first = 50) {
   const { store, cfg, gh } = ctx;
   const [o, n] = r.full_name.split("/");
   const key = `prs_cursor:${r.id}`;
   let after = await getState(store, key);
   for (let page = 0; page < 4; page++) {
-    const q = prPageQuery();
+    const q = prPageQuery(first);
     const { data } = await gh.graphql(q.query, { o, n, a: after || null });
     const conn = data?.repository?.pullRequests;
     const rows = (conn?.nodes ?? []).map((p) => prRow(r.id, p, cfg.agents, cfg.webUrl)).filter(Boolean);

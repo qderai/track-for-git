@@ -20,7 +20,7 @@ const COMMIT_FIELDS = `oid message authoredDate committedDate additions deletion
  * @param {{ owner: string, name: string, since: string|null, historyAfter: string|null, full: boolean }[]} repos
  *   full: also deploys, releases and tags (every few runs, not every run)
  */
-export function snapshotQuery(repos, { deployments = true } = {}) {
+export function snapshotQuery(repos, { deployments = true, history = 100, prs = 30 } = {}) {
   const vars = {};
   const defs = [];
   const parts = repos.map((r, i) => {
@@ -28,9 +28,9 @@ export function snapshotQuery(repos, { deployments = true } = {}) {
     defs.push(`$o${i}: String!`, `$n${i}: String!`, `$s${i}: GitTimestamp`, `$a${i}: String`);
     return `r${i}: repository(owner: $o${i}, name: $n${i}) {
       databaseId nameWithOwner isArchived isPrivate pushedAt
-      defaultBranchRef { name target { ... on Commit { history(first: 100, since: $s${i}, after: $a${i}) { pageInfo { hasNextPage endCursor } nodes { ${COMMIT_FIELDS} } } } } }
-      recent: pullRequests(first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ${PR_FIELDS} } }
-      open: pullRequests(first: 30, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) { totalCount nodes { ${PR_FIELDS} } }
+      defaultBranchRef { name target { ... on Commit { history(first: ${history}, since: $s${i}, after: $a${i}) { pageInfo { hasNextPage endCursor } nodes { ${COMMIT_FIELDS} } } } } }
+      recent: pullRequests(first: ${prs}, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ${PR_FIELDS} } }
+      open: pullRequests(first: ${prs}, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) { totalCount nodes { ${PR_FIELDS} } }
       ${r.full ? `${deployments ? "deployments(first: 20, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { databaseId environment createdAt commitOid ref { name } creator { login } latestStatus { state createdAt } } }" : ""}
       releases(first: 10, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { databaseId name tagName publishedAt createdAt isPrerelease isDraft url tagCommit { oid } author { login } } }
       refs(refPrefix: "refs/tags/", first: 10, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) { nodes { name target { oid ... on Commit { committedDate } ... on Tag { tagger { date } target { oid ... on Commit { committedDate } } } } } }` : ""}
@@ -40,10 +40,10 @@ export function snapshotQuery(repos, { deployments = true } = {}) {
 }
 
 /** Pure. Older pull requests of one repository, a page further back (backfill). */
-export function prPageQuery() {
+export function prPageQuery(first = 50) {
   return {
     query: `query($o: String!, $n: String!, $a: String) { repository(owner: $o, name: $n) {
-      pullRequests(first: 50, after: $a, orderBy: { field: UPDATED_AT, direction: DESC }) { pageInfo { hasNextPage endCursor } nodes { ${PR_FIELDS} } } } }`,
+      pullRequests(first: ${first}, after: $a, orderBy: { field: UPDATED_AT, direction: DESC }) { pageInfo { hasNextPage endCursor } nodes { ${PR_FIELDS} } } } }`,
   };
 }
 
