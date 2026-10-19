@@ -134,10 +134,8 @@ async function discover(ctx, matches, now) {
       path = fullDue ? nextPage(res.link, cfg.apiUrl) : null;
     }
   }
-  // Repositories named in full (owner/name, no wildcard), asked for one by one: outside the organisation, and inside it
-  // too. A fine-grained token limited to some repositories does not see the organisation's private ones in its
-  // listing, and they would be retired below as gone.
-  const named = cfg.repos.filter((p) => !p.startsWith("!") && p.includes("/") && !p.includes("*"));
+  // Repositories named in full outside the organisation (or with no organisation set).
+  const named = cfg.repos.filter((p) => !p.startsWith("!") && p.includes("/") && !p.includes("*") && (!cfg.org || !p.toLowerCase().startsWith(`${cfg.org}/`)));
   if (named.length && fullDue) {
     for (const part of chunks(named.slice(0, 200), 20)) {
       const q = reposQuery(part);
@@ -181,12 +179,31 @@ async function snapshot(ctx, batch, now, out) {
     const since = walking ? Number(r.history_since) : Math.max((r.history_at ?? now - cfg.backfillDays * DAY) - HOUR, now - cfg.backfillDays * DAY);
     return { r, owner, name, since: new Date(since).toISOString(), sinceMs: since, historyAfter: walking ? r.history_cursor : null, full: true };
   });
-  const q = snapshotQuery(plan);
-  const { data } = await gh.graphql(q.query, q.variables);
+  // A token without the Deployments permission (a fine-grained one made read-only for code) gets every repository back
+  // as null when deploys are asked for: GitHub cannot leave that field empty, so the whole repository goes. Then the
+  // snapshot asks without deploys, says so on the status, and tries with them again every 6 hours.
+  const note = await store.first("SELECT value, updated_at FROM state WHERE key = 'deployments_note'");
+  const noDeploys = !!note?.value && now - Number(note.updated_at) < 6 * HOUR;
+  const q = snapshotQuery(plan, { deployments: !noDeploys });
+  const { data, errors } = await gh.graphql(q.query, q.variables);
+  // Only when the refused field took the whole repository with it: an error deeper inside deploys leaves the rest.
+  if (!noDeploys && (errors ?? []).some((e) => Array.isArray(e?.path) && e.path.length === 2 && e.path[1] === "deployments" && e?.type !== "NOT_FOUND" && data?.[e.path[0]] == null)) {
+    await setState(store, "deployments_note", "Deploys from GitHub need the Deployments: read permission", now);
+    return snapshot(ctx, batch, now, out);
+  }
+  if (!noDeploys && note?.value) await setState(store, "deployments_note", "", now);
   for (let i = 0; i < plan.length; i++) {
     const { r, sinceMs } = plan[i];
     const node = data?.[`r${i}`];
-    if (!node) { r.snapshotDone = true; await store.run("UPDATE repos SET removed = 1 WHERE id = ?", r.id); continue; }  // gone, or no access
+    if (!node) {
+      // Only "not found" (deleted, moved away, no longer shared with the token) retires a repository. Any other reason
+      // GitHub gives is reported and the repository kept, not counted as synced, so the next run asks again.
+      const why = (errors ?? []).find((e) => Array.isArray(e?.path) && e.path[0] === `r${i}` && e?.type !== "NOT_FOUND");
+      if (why) { out.errors.push(`${r.full_name}: ${String(why.message ?? why.type ?? "no answer").slice(0, 160)}`); continue; }
+      r.snapshotDone = true;
+      await store.run("UPDATE repos SET removed = 1 WHERE id = ?", r.id);
+      continue;
+    }
     const stmts = [];
     const def = node.defaultBranchRef?.name ?? r.default_branch;
     stmts.push({ sql: "UPDATE repos SET default_branch = ?, archived = ?, private = ?, pushed_at = MAX(COALESCE(pushed_at, 0), ?) WHERE id = ?",

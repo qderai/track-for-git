@@ -70,6 +70,7 @@ export default {
   "status.rate": "GitHub allowance left",
   "status.rateLine": "{resource}: {remaining} of {limit}, resets {at}",
   "status.repos": "Repositories watched",
+  "status.deploys": "Deploys from GitHub",
   "status.tz": "Times shown in",
   "status.tzTeam": "{zone} (the team's time zone)",
   "status.tzYours": "{zone} (your browser's)",

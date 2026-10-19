@@ -90,6 +90,8 @@ npx wrangler secret put GITHUB_TOKEN
 ```
 
 If CI always shows "No CI" with a token, the token cannot see your check runs. A GitHub App with Checks: read can.
+Without Deployments, GitHub's deploys are left out (everything else syncs, and *Connection* says so); deploys from
+your own pipeline can still reach the timeline (see *Inside an app you already run*).
 
 ### Which repositories
 
@@ -99,9 +101,7 @@ By default, every repository of `GITHUB_ORG` that the App or token can see, exce
 REPOS = "api-*, web, mobile-*, !legacy-*, partner-org/sdk"
 ```
 
-Names, `owner/name`, `*` wildcards, `!` to leave out. `INCLUDE_ARCHIVED=1` keeps archived repositories. A repository
-named in full (`acme/api`) is looked up by name as well: a fine-grained token limited to some repositories does not
-see the organisation's private ones when it lists them, so name them in full.
+Names, `owner/name`, `*` wildcards, `!` to leave out. `INCLUDE_ARCHIVED=1` keeps archived repositories.
 
 The first sync reads the last `BACKFILL_DAYS` (30 by default) a little at a time, inside the rate limit. Large
 organisations fill in over the first hour or so; everything new arrives at once.

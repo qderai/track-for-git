@@ -20,7 +20,7 @@ const COMMIT_FIELDS = `oid message authoredDate committedDate additions deletion
  * @param {{ owner: string, name: string, since: string|null, historyAfter: string|null, full: boolean }[]} repos
  *   full: also deploys, releases and tags (every few runs, not every run)
  */
-export function snapshotQuery(repos) {
+export function snapshotQuery(repos, { deployments = true } = {}) {
   const vars = {};
   const defs = [];
   const parts = repos.map((r, i) => {
@@ -31,7 +31,7 @@ export function snapshotQuery(repos) {
       defaultBranchRef { name target { ... on Commit { history(first: 100, since: $s${i}, after: $a${i}) { pageInfo { hasNextPage endCursor } nodes { ${COMMIT_FIELDS} } } } } }
       recent: pullRequests(first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ${PR_FIELDS} } }
       open: pullRequests(first: 30, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) { totalCount nodes { ${PR_FIELDS} } }
-      ${r.full ? `deployments(first: 20, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { databaseId environment createdAt commitOid ref { name } creator { login } latestStatus { state createdAt } } }
+      ${r.full ? `${deployments ? "deployments(first: 20, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { databaseId environment createdAt commitOid ref { name } creator { login } latestStatus { state createdAt } } }" : ""}
       releases(first: 10, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { databaseId name tagName publishedAt createdAt isPrerelease isDraft url tagCommit { oid } author { login } } }
       refs(refPrefix: "refs/tags/", first: 10, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) { nodes { name target { oid ... on Commit { committedDate } ... on Tag { tagger { date } target { oid ... on Commit { committedDate } } } } } }` : ""}
     }`;

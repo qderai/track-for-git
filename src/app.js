@@ -193,14 +193,15 @@ export function createApp(platform) {
   }
 
   async function status(now) {
-    const [webhookAt, sync, rate, teamsNote, counts] = await Promise.all([
+    const [webhookAt, sync, rate, teamsNote, counts, deploymentsNote] = await Promise.all([
       getState(store, "webhook_at"), getJson(store, "sync_last"), getJson(store, "rate"), getState(store, "teams_note"),
       store.first("SELECT (SELECT COUNT(*) FROM repos WHERE removed = 0) AS repos, (SELECT MAX(at) FROM commits) AS lastCommit, (SELECT COUNT(*) FROM commits WHERE at >= ?) AS day", now - 86_400_000),
+      getState(store, "deployments_note"),
     ]);
     const limits = Object.fromEntries(Object.entries(rate ?? {}).filter(([k]) => ["core", "graphql"].includes(k))
       .map(([k, v]) => [k, { limit: v.limit, remaining: v.remaining, reset: v.reset, blockedUntil: v.blockedUntil ?? null }]));
     return {
-      setup: setupState(cfg), now, webhookAt: webhookAt ? Number(webhookAt) : null, sync, rate: limits, teamsNote: teamsNote || null,
+      setup: setupState(cfg), now, webhookAt: webhookAt ? Number(webhookAt) : null, sync, rate: limits, teamsNote: teamsNote || null, deploymentsNote: deploymentsNote || null,
       repos: Number(counts?.repos ?? 0), lastCommitAt: counts?.lastCommit ? Number(counts.lastCommit) : null, commits24h: Number(counts?.day ?? 0),
     };
   }

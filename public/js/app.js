@@ -648,6 +648,7 @@ function openStatus() {
     const rates = Object.entries(s.rate ?? {});
     if (rates.length) row(t("status.rate"), h("ul", null, rates.map(([k, v]) => h("li", null, t("status.rateLine", { resource: k === "core" ? "REST" : "GraphQL", remaining: num(v.remaining), limit: num(v.limit), at: dateTime(v.reset) })))));
     if (s.teamsNote) row(t("status.teams"), s.teamsNote);
+    if (s.deploymentsNote) row(t("status.deploys"), s.deploymentsNote);
     if (s.sync?.errors?.length) row(t("status.errors"), h("ul", null, s.sync.errors.map((e) => h("li", null, e))));
   }
   dlg.showModal();

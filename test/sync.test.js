@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readConfig } from "../src/config.js";
 import { createGitHub, rateOf, reserveOf } from "../src/github/client.js";
+import { createApp } from "../src/app.js";
 import { prune, repoMatcher, runSync } from "../src/sync.js";
 import { fakeFetch, memStore, sha } from "./helpers.js";
 
@@ -124,27 +125,70 @@ test("retention removes old rows once a day", async () => {
   assert.deepEqual((await store.all("SELECT path FROM commit_files")).map((r) => r.path), ["b"]);
 });
 
-test("a fine-grained token that cannot list the organisation's private repositories: named ones are found and kept", async () => {
+test("a token without the Deployments permission: no repository vanishes, deploys are left out and the status says why", async () => {
   const now = Date.parse("2026-10-19T10:00:00Z");
-  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", REPOS: "acme/api, acme/web", BACKFILL_DAYS: "7" });
-  const node = (id, name) => ({ databaseId: id, nameWithOwner: name, isArchived: false, isPrivate: true, pushedAt: "2026-10-19T09:00:00Z",
-    defaultBranchRef: { name: "main", target: { history: { pageInfo: { hasNextPage: false }, nodes: [] } } },
-    recent: { nodes: [] }, open: { totalCount: 0, nodes: [] }, deployments: { nodes: [] }, releases: { nodes: [] }, refs: { nodes: [] } });
+  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", BACKFILL_DAYS: "7" });
+  const node = { databaseId: 7, nameWithOwner: "acme/api", isArchived: false, isPrivate: true, pushedAt: "2026-10-19T09:00:00Z",
+    defaultBranchRef: { name: "main", target: { history: { pageInfo: { hasNextPage: false }, nodes: [
+      { oid: sha(31), message: "Ship", authoredDate: "2026-10-19T08:00:00Z", additions: 1, deletions: 0, changedFilesIfAvailable: 1, author: { name: "Dana", user: { login: "dana" } }, associatedPullRequests: { nodes: [] } }] } } },
+    recent: { nodes: [] }, open: { totalCount: 0, nodes: [] }, releases: { nodes: [] }, refs: { nodes: [] } };
+  const queries = [];
   const fetch = fakeFetch([
-    // The organisation's listing shows only its public repositories to this token.
-    ["/orgs/acme/repos", { body: [{ id: 99, full_name: "acme/website", default_branch: "main", private: false, archived: false, pushed_at: "2026-10-18T00:00:00Z" }] }],
+    ["/orgs/acme/repos", { body: [{ id: 7, full_name: "acme/api", default_branch: "main", private: true, archived: false, pushed_at: "2026-10-19T09:00:00Z" }] }],
     ["/graphql", (u, init) => {
-      const { query, variables } = JSON.parse(init.body);
-      if (query.includes("nameWithOwner isArchived")) return { body: { data: Object.fromEntries(Object.keys(variables).filter((k) => k.startsWith("n")).map((k) => [`r${k.slice(1)}`, variables[k] === "api" ? node(7, "acme/api") : null])), errors: [{ type: "NOT_FOUND", message: "Could not resolve to a Repository with the name 'acme/web'." }] } };
-      return { body: { data: { r0: node(7, "acme/api") } } };
+      const { query } = JSON.parse(init.body);
+      queries.push(query);
+      // GitHub's answer to a fine-grained token without Deployments: the field cannot be null, so the repository is.
+      if (query.includes("deployments(")) return { body: { data: { r0: null }, errors: [{ type: "FORBIDDEN", path: ["r0", "deployments"], message: "Resource not accessible by personal access token" }] } };
+      return { body: { data: { r0: node } } };
     }],
     ["/repos/acme/api/events", { body: [] }],
   ]);
   const store = memStore();
-  // A webhook had already brought the repository in.
-  await store.run("INSERT INTO repos (id, full_name, default_branch, private) VALUES (7, 'acme/api', 'main', 1)");
   const r = await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now);
   assert.deepEqual(r.errors, []);
-  assert.deepEqual(await store.all("SELECT id, full_name, removed FROM repos ORDER BY id"), [{ id: 7, full_name: "acme/api", removed: 0 }], "found by name, not retired; acme/web cannot be seen and is not invented");
-  assert.equal(r.repos, 1, "and synced");
+  assert.equal((await store.first("SELECT removed FROM repos WHERE id = 7")).removed, 0, "kept");
+  assert.equal((await store.first("SELECT COUNT(*) AS n FROM commits")).n, 1, "and synced, without deploys");
+  assert.match(String((await store.first("SELECT value FROM state WHERE key = 'deployments_note'")).value), /Deployments: read/);
+  // The next runs do not ask for deploys (until 6 hours have passed); the status says why there are none.
+  const app = createApp({ env: { GITHUB_ORG: "acme", GITHUB_TOKEN: "t", AUTH: "none" }, store });
+  assert.match((await (await app.fetch(new Request("https://dash.example/api/status"))).json()).deploymentsNote, /Deployments: read/);
+  await store.run("UPDATE repos SET dirty = 1 WHERE id = 7");
+  queries.length = 0;
+  await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now + 120_000);
+  assert.ok(queries.length && queries.every((q) => !q.includes("deployments(")));
+});
+
+test("a repository GitHub answers as null for any reason but 'not found' is reported and kept; 'not found' retires it", async () => {
+  const now = Date.parse("2026-10-19T10:00:00Z");
+  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", BACKFILL_DAYS: "7" });
+  for (const [type, removed, errs] of [["FORBIDDEN", 0, 1], ["NOT_FOUND", 1, 0]]) {
+    const fetch = fakeFetch([
+      ["/orgs/acme/repos", { body: [{ id: 7, full_name: "acme/api", default_branch: "main", private: true, archived: false, pushed_at: "2026-10-19T09:00:00Z" }] }],
+      ["/graphql", { body: { data: { r0: null }, errors: [{ type, path: ["r0"], message: `${type} answer` }] } }],
+      ["/repos/acme/api/events", { body: [] }],
+    ]);
+    const store = memStore();
+    const r = await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now);
+    assert.equal((await store.first("SELECT removed FROM repos WHERE id = 7")).removed, removed, type);
+    assert.equal(r.errors.length, errs, type);
+    if (!removed) assert.equal((await store.first("SELECT synced_at FROM repos WHERE id = 7")).synced_at, null, "not counted as synced: asked again next run");
+  }
+});
+
+test("an error deeper inside deploys leaves deploys on and the repository whole", async () => {
+  const now = Date.parse("2026-10-19T10:00:00Z");
+  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", BACKFILL_DAYS: "7" });
+  const node = { databaseId: 7, nameWithOwner: "acme/api", isArchived: false, isPrivate: true, pushedAt: "2026-10-19T09:00:00Z",
+    defaultBranchRef: { name: "main", target: { history: { pageInfo: { hasNextPage: false }, nodes: [] } } },
+    recent: { nodes: [] }, open: { totalCount: 0, nodes: [] }, deployments: { nodes: [] }, releases: { nodes: [] }, refs: { nodes: [] } };
+  const fetch = fakeFetch([
+    ["/orgs/acme/repos", { body: [{ id: 7, full_name: "acme/api", default_branch: "main", private: true, archived: false, pushed_at: "2026-10-19T09:00:00Z" }] }],
+    ["/graphql", { body: { data: { r0: node }, errors: [{ type: "FORBIDDEN", path: ["r0", "deployments", "nodes", 0, "creator"], message: "creator hidden" }] } }],
+    ["/repos/acme/api/events", { body: [] }],
+  ]);
+  const store = memStore();
+  await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now);
+  assert.equal((await store.first("SELECT removed FROM repos WHERE id = 7")).removed, 0);
+  assert.equal(await store.first("SELECT value FROM state WHERE key = 'deployments_note'"), null, "deploys still asked for");
 });
