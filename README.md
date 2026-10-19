@@ -1,5 +1,10 @@
 <h1>Track for Git</h1>
 
+<p align="center">
+  <a href="docs/media/track-for-git-promo.mp4"><img alt="Track for Git in 45 seconds: the timeline split by people and AI agents, a commit made with Claude and its diff, stuck pull requests, the plain-words Story, light and dark, desktop and phone" src="docs/media/track-for-git-promo.webp" width="100%"></a>
+  <br><sub>45 seconds, no sound. <a href="docs/media/track-for-git-promo.mp4">Watch it as a 1080p video</a>.</sub>
+</p>
+
 **Every commit, push and pull request across your GitHub organisation, as it happens: who made it (and with which AI
 agent), what changed, what is stuck, and what shipped. On one calm page that managers and engineers both read.**
 
