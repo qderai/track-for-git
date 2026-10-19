@@ -134,8 +134,10 @@ async function discover(ctx, matches, now) {
       path = fullDue ? nextPage(res.link, cfg.apiUrl) : null;
     }
   }
-  // Repositories named in full outside the organisation (or with no organisation set).
-  const named = cfg.repos.filter((p) => !p.startsWith("!") && p.includes("/") && !p.includes("*") && (!cfg.org || !p.toLowerCase().startsWith(`${cfg.org}/`)));
+  // Repositories named in full (owner/name, no wildcard), asked for one by one: outside the organisation, and inside it
+  // too. A fine-grained token limited to some repositories does not see the organisation's private ones in its
+  // listing, and they would be retired below as gone.
+  const named = cfg.repos.filter((p) => !p.startsWith("!") && p.includes("/") && !p.includes("*"));
   if (named.length && fullDue) {
     for (const part of chunks(named.slice(0, 200), 20)) {
       const q = reposQuery(part);

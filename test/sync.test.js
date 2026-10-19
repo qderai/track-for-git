@@ -123,3 +123,28 @@ test("retention removes old rows once a day", async () => {
   assert.deepEqual((await store.all("SELECT message FROM commits")).map((r) => r.message), ["new"]);
   assert.deepEqual((await store.all("SELECT path FROM commit_files")).map((r) => r.path), ["b"]);
 });
+
+test("a fine-grained token that cannot list the organisation's private repositories: named ones are found and kept", async () => {
+  const now = Date.parse("2026-10-19T10:00:00Z");
+  const cfg = readConfig({ GITHUB_ORG: "acme", GITHUB_TOKEN: "t", REPOS: "acme/api, acme/web", BACKFILL_DAYS: "7" });
+  const node = (id, name) => ({ databaseId: id, nameWithOwner: name, isArchived: false, isPrivate: true, pushedAt: "2026-10-19T09:00:00Z",
+    defaultBranchRef: { name: "main", target: { history: { pageInfo: { hasNextPage: false }, nodes: [] } } },
+    recent: { nodes: [] }, open: { totalCount: 0, nodes: [] }, deployments: { nodes: [] }, releases: { nodes: [] }, refs: { nodes: [] } });
+  const fetch = fakeFetch([
+    // The organisation's listing shows only its public repositories to this token.
+    ["/orgs/acme/repos", { body: [{ id: 99, full_name: "acme/website", default_branch: "main", private: false, archived: false, pushed_at: "2026-10-18T00:00:00Z" }] }],
+    ["/graphql", (u, init) => {
+      const { query, variables } = JSON.parse(init.body);
+      if (query.includes("nameWithOwner isArchived")) return { body: { data: Object.fromEntries(Object.keys(variables).filter((k) => k.startsWith("n")).map((k) => [`r${k.slice(1)}`, variables[k] === "api" ? node(7, "acme/api") : null])), errors: [{ type: "NOT_FOUND", message: "Could not resolve to a Repository with the name 'acme/web'." }] } };
+      return { body: { data: { r0: node(7, "acme/api") } } };
+    }],
+    ["/repos/acme/api/events", { body: [] }],
+  ]);
+  const store = memStore();
+  // A webhook had already brought the repository in.
+  await store.run("INSERT INTO repos (id, full_name, default_branch, private) VALUES (7, 'acme/api', 'main', 1)");
+  const r = await runSync({ store, cfg, gh: createGitHub(cfg, { fetchImpl: fetch, maxRequests: 40 }) }, now);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(await store.all("SELECT id, full_name, removed FROM repos ORDER BY id"), [{ id: 7, full_name: "acme/api", removed: 0 }], "found by name, not retired; acme/web cannot be seen and is not invented");
+  assert.equal(r.repos, 1, "and synced");
+});
