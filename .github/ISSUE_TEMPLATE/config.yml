@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: mailto:security@qder.ai
+    about: Never in a public issue. See SECURITY.md.
+  - name: Set-up help
+    url: https://github.com/qderai/track-for-git/blob/main/docs/setup.md
+    about: The one-page setup covers the GitHub App, the webhook and sign-in.

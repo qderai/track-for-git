@@ -1,0 +1,34 @@
+// Track for Git on Cloudflare Workers + D1. `npm run deploy` creates the database on the first deploy (no ID needed
+// here), applies the migrations and deploys. Secrets go in with `npx wrangler secret put NAME` (see .dev.vars.example).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "track-for-git",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Only these reach the Worker; the page itself is served straight from the edge.
+    "run_worker_first": ["/api/*", "/auth/*", "/healthz"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "track-for-git", "migrations_dir": "migrations" }
+  ],
+  // The sync: once a minute, a few seconds of work when nothing changed.
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    // "1" shows a made-up organisation until you connect yours: set it to "" then.
+    "DEMO": "1",
+    // access | github | none (see docs/setup.md). Nothing set and DEMO off means the dashboard refuses to answer.
+    "AUTH": "",
+    "GITHUB_ORG": "",
+    "REPOS": "",
+    "STALE_DAYS": "7",
+    "RETENTION_DAYS": "180",
+    "BACKFILL_DAYS": "30",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
+  "observability": { "enabled": true }
+}

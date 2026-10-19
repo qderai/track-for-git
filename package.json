@@ -1,0 +1,41 @@
+{
+  "name": "track-for-git",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A calm, real-time dashboard of your organisation's GitHub activity: every commit, push and pull request, who made it (and with which AI agent), what changed and what shipped. Self-hosted on Cloudflare Workers + D1, or Node.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Qder AI (https://qder.ai)",
+  "repository": { "type": "git", "url": "git+https://github.com/qderai/track-for-git.git" },
+  "keywords": ["github", "dashboard", "commits", "pull-requests", "engineering-metrics", "ai-agents", "cloudflare-workers", "d1", "self-hosted"],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "demo": "node server/demo.js",
+    "start": "node server/node.js",
+    "dev": "wrangler d1 migrations apply DB --local && wrangler dev",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "cloudflare": {
+    "bindings": {
+      "GITHUB_ORG": { "description": "Your GitHub organisation's login, for example `acme`. Leave empty with `DEMO=1`." },
+      "AUTH": { "description": "Who may open the dashboard: `access` (Cloudflare Access, recommended), `github` (members of the organisation sign in with GitHub) or `none` (only for a private network or the demo)." },
+      "DEMO": { "description": "`1` shows a made-up organisation so you can try it before connecting GitHub. Remove it when you connect yours." },
+      "GITHUB_APP_ID": { "description": "Your GitHub App's ID (recommended; read-only). See [docs/setup.md](https://github.com/qderai/track-for-git/blob/main/docs/setup.md)." },
+      "GITHUB_APP_PRIVATE_KEY": { "description": "The App's private key (the whole `.pem` file)." },
+      "GITHUB_TOKEN": { "description": "Instead of an App: a fine-grained token, read-only (Contents, Metadata, Pull requests, Deployments, Commit statuses; Members for teams)." },
+      "GITHUB_WEBHOOK_SECRET": { "description": "The secret of the webhook (App or organisation), for real-time updates. A long random string." },
+      "GITHUB_OAUTH_CLIENT_ID": { "description": "With `AUTH=github`: the OAuth client ID (the GitHub App's own works)." },
+      "GITHUB_OAUTH_CLIENT_SECRET": { "description": "With `AUTH=github`: the OAuth client secret." },
+      "SESSION_SECRET": { "description": "With `AUTH=github`: 32+ random characters that sign the session cookie." },
+      "ACCESS_TEAM_DOMAIN": { "description": "With `AUTH=access`: your Zero Trust team domain, for example `acme.cloudflareaccess.com`." },
+      "ACCESS_AUD": { "description": "With `AUTH=access`: the Application Audience (AUD) tag of the Access application." }
+    }
+  },
+  "devDependencies": {
+    "wrangler": "4.151.1"
+  },
+  "engines": { "node": ">=22.13" }
+}

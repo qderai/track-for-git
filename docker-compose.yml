@@ -1,0 +1,11 @@
+# docker compose up: Track for Git on http://localhost:8787 with its data in a volume.
+# Put your settings in .env (see .dev.vars.example and docs/setup.md). Try it first with DEMO=1 and AUTH=none.
+services:
+  track-for-git:
+    build: .
+    ports: ["8787:8787"]
+    env_file: .env
+    volumes: ["track-data:/data"]
+    restart: unless-stopped
+volumes:
+  track-data:

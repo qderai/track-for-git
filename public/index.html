@@ -1,0 +1,197 @@
+<!doctype html>
+<!-- Copyright 2026 Qder AI. Licensed under the Apache License, Version 2.0. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Every commit, push and pull request across your organisation, as it happens.">
+  <title>Track for Git</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+    <symbol id="i-logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="currentColor"/><path d="M5 16h22" stroke="var(--logo-ink)" stroke-width="2.4" stroke-linecap="round" opacity=".55"/><circle cx="9" cy="16" r="3.2" fill="var(--logo-ink)"/><circle cx="16" cy="16" r="3.2" fill="var(--logo-ink)"/><circle cx="23" cy="16" r="4.2" fill="none" stroke="var(--logo-ink)" stroke-width="2.4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3L13 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-dot" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 4.5V8l2.5 1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-comment" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+    <symbol id="i-external" viewBox="0 0 16 16"><path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 10.5V3.5A1 1 0 0 1 4 2.5h6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-commit" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M1 8h4M11 8h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-pr" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="4" cy="12.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 5.3v5.4M12 10.7V6a2 2 0 0 0-2-2H7.5M9 2.5L7.5 4 9 5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-merged" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="4" cy="12.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="8" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 5.3v5.4M4.8 5c1 2 3 3 5.4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-closed" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="4" cy="12.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 5.3v5.4M10 3l4 4M14 3l-4 4M12 10v.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-rocket" viewBox="0 0 16 16"><path d="M9.5 2.5c2.5 0 4 1.5 4 4L9 11 5 7zM5 7L2.5 7.5 4 5.5zM9 11l-.5 2.5 2-1.5zM4.5 11.5L3 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 16 16"><path d="M2.5 2.5h5.5l5.5 5.5-5.5 5.5-5.5-5.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="5.5" cy="5.5" r="1.1" fill="currentColor"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+    <symbol id="i-contrast" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor"/></symbol>
+    <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" d="M8 .2a8 8 0 0 0-2.5 15.6c.4 0 .5-.2.5-.4v-1.5c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.4.7 0-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.4 7.4 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.8-3.6 4 .3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 .2z"/></symbol>
+  </svg>
+
+  <a class="skip" href="#main" data-t="app.skip">Skip to the content</a>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+
+  <main id="gate" class="gate" hidden></main>
+
+  <div id="app" hidden>
+    <header class="top">
+      <div class="brand">
+        <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
+        <span class="name" data-t="app.title">Track for Git</span>
+        <span class="org" id="org"></span>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="status" class="status" aria-haspopup="dialog"><i aria-hidden="true"></i><span class="txt">…</span></button>
+        <button type="button" id="theme" class="icon-btn"><svg class="i" aria-hidden="true"><use href="#i-contrast"/></svg></button>
+        <form id="signout" method="post" action="/auth/logout" hidden><button type="submit" class="btn ghost sm" data-t="signout">Sign out</button></form>
+      </div>
+    </header>
+    <p id="banner" class="banner" hidden></p>
+
+    <div class="bar">
+      <div class="seg" role="group" data-t-label="range.label">
+        <button type="button" data-range="1d" data-t="range.1d">24 hours</button>
+        <button type="button" data-range="7d" data-t="range.7d">7 days</button>
+        <button type="button" data-range="30d" data-t="range.30d">30 days</button>
+        <button type="button" data-range="90d" data-t="range.90d">90 days</button>
+      </div>
+      <form id="search" class="search" role="search">
+        <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="q" type="search" autocomplete="off" spellcheck="false" data-t-label="search.label" data-t-placeholder="search.placeholder">
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+      <div class="filters" role="group" aria-label="Filters">
+        <button type="button" class="fbtn" id="f-repos" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+        <button type="button" class="fbtn" id="f-team" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+        <button type="button" class="fbtn" id="f-author" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+        <button type="button" class="fbtn" id="f-agent" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+        <button type="button" class="fbtn" id="f-branch" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+        <button type="button" class="fbtn" id="f-path" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+        <button type="button" class="fbtn" id="f-label" aria-haspopup="dialog" aria-expanded="false" hidden><svg class="i" aria-hidden="true"><use href="#i-down"/></svg><span></span></button>
+      </div>
+    </div>
+    <ul id="chips" class="chips" aria-label="Active filters"></ul>
+
+    <nav class="tabs" role="tablist" data-t-label="tabs.label">
+      <button type="button" role="tab" id="t-overview" data-tab="overview" aria-controls="p-overview" data-t="tabs.overview">Overview</button>
+      <button type="button" role="tab" id="t-commits" data-tab="commits" aria-controls="p-commits" data-t="tabs.commits">Commits</button>
+      <button type="button" role="tab" id="t-prs" data-tab="prs" aria-controls="p-prs" data-t="tabs.prs">Pull requests</button>
+      <button type="button" role="tab" id="t-story" data-tab="story" aria-controls="p-story" data-t="tabs.story">Story</button>
+    </nav>
+
+    <main id="main" tabindex="-1">
+      <section id="p-overview" role="tabpanel" aria-labelledby="t-overview" class="panel">
+        <div id="tiles" class="tiles" aria-live="off"></div>
+
+        <section class="card" aria-labelledby="h-timeline">
+          <header class="card-head">
+            <h2 id="h-timeline" data-t="timeline.title">Timeline</h2>
+            <span class="hint" id="timeline-sum"></span>
+            <div class="seg sm" role="group" data-t-label="timeline.group">
+              <button type="button" data-group="repo" data-t="timeline.byRepo">Repository</button>
+              <button type="button" data-group="person" data-t="timeline.byPerson">Person</button>
+              <button type="button" data-group="team" data-t="timeline.byTeam">Team</button>
+            </div>
+          </header>
+          <ul id="legend" class="legend" aria-label="Legend"></ul>
+          <div id="timeline" class="timeline"></div>
+        </section>
+
+        <div class="cols">
+          <section class="card" aria-labelledby="h-who">
+            <header class="card-head"><h2 id="h-who" data-t="who.title">Who wrote the code</h2></header>
+            <p class="card-sub" data-t="who.sub"></p>
+            <div id="who"></div>
+          </section>
+          <section class="card" aria-labelledby="h-att">
+            <header class="card-head"><h2 id="h-att" data-t="attention.title">Needs attention</h2></header>
+            <div id="attention" class="attention"></div>
+          </section>
+        </div>
+
+        <section class="card" aria-labelledby="h-heat">
+          <header class="card-head">
+            <h2 id="h-heat" data-t="heat.title">Activity</h2>
+            <div class="seg sm" role="group" data-t-label="heat.by">
+              <button type="button" data-heat="repo" data-t="timeline.byRepo">Repository</button>
+              <button type="button" data-heat="person" data-t="timeline.byPerson">Person</button>
+              <button type="button" data-heat="team" data-t="timeline.byTeam">Team</button>
+            </div>
+            <button type="button" id="heat-table" class="btn ghost sm" data-t="heat.table">Show as a table</button>
+          </header>
+          <div id="heat" class="heat"></div>
+        </section>
+      </section>
+
+      <section id="p-commits" role="tabpanel" aria-labelledby="t-commits" class="panel" hidden>
+        <div class="split">
+          <section class="card list-card" aria-label="Commits and pushes">
+            <header class="card-head">
+              <div class="seg sm" role="group">
+                <button type="button" data-list="commits" data-t="list.commits">Commits</button>
+                <button type="button" data-list="pushes" data-t="list.pushes">Pushes</button>
+              </div>
+              <span class="hint" id="list-count"></span>
+            </header>
+            <button type="button" id="newer" class="newer" hidden></button>
+            <div id="commit-list" class="list"></div>
+            <div id="push-list" class="list" hidden></div>
+          </section>
+          <section id="detail-commit" class="card detail" aria-live="off" aria-label="Commit"></section>
+        </div>
+      </section>
+
+      <section id="p-prs" role="tabpanel" aria-labelledby="t-prs" class="panel" hidden>
+        <div class="split">
+          <section class="card list-card" aria-label="Pull requests">
+            <header class="card-head wrap">
+              <div class="seg sm states" role="group" data-t-label="pr.states">
+                <button type="button" data-state="open"><span data-t="pr.open">Open</span> <span class="n"></span></button>
+                <button type="button" data-state="stuck"><span data-t="pr.stuck">Stuck</span> <span class="n"></span></button>
+                <button type="button" data-state="merged"><span data-t="pr.merged">Merged</span> <span class="n"></span></button>
+                <button type="button" data-state="closed"><span data-t="pr.closed">Closed</span> <span class="n"></span></button>
+              </div>
+              <label class="sort"><span class="sr-only" data-t="pr.sort">Sort</span>
+                <select id="pr-sort">
+                  <option value="" data-t="pr.sort.default">Default</option>
+                  <option value="updated" data-t="pr.sort.updated">Recently updated</option>
+                  <option value="oldest" data-t="pr.sort.oldest">Oldest first</option>
+                  <option value="largest" data-t="pr.sort.largest">Largest first</option>
+                </select>
+              </label>
+            </header>
+            <div id="pr-list" class="list pr-list"></div>
+          </section>
+          <section id="detail-pr" class="card detail" aria-live="off" aria-label="Pull request"></section>
+        </div>
+      </section>
+
+      <section id="p-story" role="tabpanel" aria-labelledby="t-story" class="panel" hidden>
+        <header class="story-head"><h2 data-t="story.title">What happened</h2><p data-t="story.sub"></p></header>
+        <div id="story" class="story"></div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <a class="built" href="https://qder.ai" rel="noopener"><span data-t="app.builtBy">Built by</span><img class="qder on-light" src="/brand/qder-lockup-ltr-cobalt.svg" alt="Qder.ai" width="98" height="20"><img class="qder on-dark" src="/brand/qder-lockup-ltr-white.svg" alt="Qder.ai" width="98" height="20"></a>
+      <p><span data-t="app.oss">Open source, Apache-2.0</span> · <a href="https://github.com/qderai/track-for-git" rel="noopener">github.com/qderai/track-for-git</a></p>
+      <p class="small" data-t="app.disclaimer"></p>
+    </footer>
+  </div>
+
+  <dialog id="status-dialog" aria-labelledby="status-title">
+    <h2 id="status-title" data-t="status.title">Connection</h2>
+    <dl id="status-body"></dl>
+    <form method="dialog"><button type="submit" id="status-close" class="btn sm" data-t="status.close">Close</button></form>
+  </dialog>
+</body>
+</html>

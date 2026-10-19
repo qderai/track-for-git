@@ -1,0 +1,14 @@
+# Secrets. Locally: copy to .dev.vars. On Cloudflare: `npx wrangler secret put NAME` for each one you use.
+# Never commit real values.
+
+# GitHub App (recommended, read-only): its ID and the whole private key (.pem).
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY=
+# Or instead of an App: a fine-grained personal access token, read-only.
+GITHUB_TOKEN=
+# The webhook's secret (the App's, or the organisation webhook's). Several, comma-separated, while rotating.
+GITHUB_WEBHOOK_SECRET=
+# With AUTH=github: the OAuth app (the GitHub App's own client ID and secret work) and a 32+ character random secret.
+GITHUB_OAUTH_CLIENT_ID=
+GITHUB_OAUTH_CLIENT_SECRET=
+SESSION_SECRET=

@@ -1,0 +1,35 @@
+name: Bug report
+description: Something does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead. Screenshots help (blur anything private).
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Where it runs
+      options: [Cloudflare Workers + D1, Node, Docker, Demo only]
+    validations:
+      required: true
+  - type: dropdown
+    id: github
+    attributes:
+      label: GitHub
+      options: [github.com with a GitHub App, github.com with a token, GitHub Enterprise Server, Not connected yet]
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: textarea
+    id: status
+    attributes:
+      label: Connection dialog
+      description: Click the status pill at the top and paste what it says (it never shows secrets).
+  - type: markdown
+    attributes:
+      value: "Security problems go to security@qder.ai, never here. See SECURITY.md."
