@@ -37,8 +37,9 @@ behind your own sign-in.
 - **Readable changes.** For every commit and pull request: the files, the lines added and removed, and a clean diff
   with line numbers. Lock files and generated code start folded. Long diffs draw a few hundred lines at a time, so a
   10,000-line change never freezes the page.
-- **Activity heatmaps** by repository, person or team, per day in each viewer's own time zone. Each one can also be
-  read as a table.
+- **Activity heatmaps** by repository, person or team, per day in each viewer's own time zone (or the team's, with
+  `TIME_ZONE`). Each one can also be read as a table.
+- **What is live now**: the commit your newest successful deploy shipped, one click from its diff.
 - **The Story**, for people who do not read diffs: each day in plain sentences. How much changed and by whom, the
   busiest repositories, the pull requests merged, what was deployed and released.
 - **Filters that stay in the link.** Repository, team, person, agent, branch, path, label and free-text search. Any
@@ -88,6 +89,10 @@ sign-in, and turn the demo off.
 
 **Not on Cloudflare?** `docker compose up`, or `node server/node.js`: the same app on SQLite (built into Node), with
 the same settings.
+
+**Inside an app you already run?** Mount it at a path of that app with `track-for-git/embed`: the page, its API
+and the sync on your own Worker, database and sign-in, with your own deploys on the timeline and a *Live now* tile.
+See [Inside an app you already run](docs/setup.md#inside-an-app-you-already-run).
 
 ## Make your agents visible
 
@@ -157,11 +162,13 @@ npm test                 # node:test, against real SQLite with the real migratio
 npm run demo             # the app on Node with the demo
 npm run dev              # the app on wrangler dev with a local D1 (DEMO=1 by default)
 npm run screenshots      # the README's pictures (needs playwright-core and Chrome)
+npm run build:embed      # after changing public/: src/embed-assets.js, the page for track-for-git/embed
 ```
 
 ```
 src/          the Worker: app.js (routes), sync.js (polling), webhook.js, queries.js (the read side), agents.js,
-              auth.js, demo.js, github/ (client, App sign-in, GraphQL, payloads into rows)
+              auth.js, demo.js, embed.js (mounting inside another app), github/ (client, App sign-in, GraphQL,
+              payloads into rows)
 public/       the page: no framework, no build; js/, styles.css, locales/en.js (every word)
 server/       Node and Docker
 migrations/   D1 / SQLite schema

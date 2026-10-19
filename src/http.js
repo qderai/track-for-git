@@ -31,11 +31,12 @@ export function secure(res) {
 
 /**
  * A two-level cache for answers and diffs: this process's memory (a few hundred entries) and, on Workers, the edge
- * cache of the data centre. Values are JSON.
+ * cache of the data centre. Values are JSON. `ns` keeps one dashboard's entries apart from another's in the same
+ * Worker's cache (src/app.js: its base and organisation).
  */
-export function makeCache(edge = null, max = 400) {
+export function makeCache(edge = null, max = 400, ns = "") {
   const mem = new Map();
-  const base = "https://track-for-git.internal/";
+  const base = `https://track-for-git.internal/${ns ? `${encodeURIComponent(ns)}/` : ""}`;
   return {
     async get(key) {
       const m = mem.get(key);

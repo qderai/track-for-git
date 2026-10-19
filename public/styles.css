@@ -120,6 +120,9 @@ select { min-height: 2rem; border: 1px solid var(--line); border-radius: var(--r
 .brand .name { font-weight: 700; color: var(--ink); font-size: 1.05rem; white-space: nowrap; }
 .brand .org { color: var(--soft); font-weight: 600; padding-inline-start: .6rem; border-inline-start: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top-actions { display: flex; align-items: center; gap: .5rem; }
+/* Inside another app (embed=1): that app has the name and the logo already; only the connection and the theme stay. */
+.embed .top { justify-content: flex-end; padding-block: .5rem; }
+.embed .brand { display: none; }
 .status { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.25rem; padding: .3rem .8rem; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--soft); font-weight: 600; font-size: .86rem; cursor: pointer; }
 .status i { width: .55rem; height: .55rem; border-radius: 50%; background: var(--muted); }
 .status.live i { background: var(--good); box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent); animation: pulse 2.2s infinite; }
@@ -172,6 +175,9 @@ main { padding: 1.1rem clamp(1rem, 3vw, 2rem) 2rem; outline: none; }
 .card-head .hint { color: var(--soft); font-size: .86rem; }
 .card-sub { margin: 0; padding: .7rem 1.1rem 0; color: var(--soft); font-size: .86rem; }
 .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .75rem; }
+.tiles.with-live { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.tile.live { text-decoration: none; border-color: var(--accent); }
+.tile.live .tl-v { letter-spacing: .02em; }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .85rem 1rem; box-shadow: var(--shadow); text-align: start; min-width: 0; }
 .tile p { margin: 0; }
 .tile.go { cursor: pointer; font: inherit; color: inherit; }
@@ -410,7 +416,8 @@ dialog form { display: flex; justify-content: flex-end; }
 
 /* ------------------------------------------------------------------------------------------------- narrower */
 @media (max-width: 1200px) {
-  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tiles, .tiles.with-live { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tile.live { grid-column: 1 / -1; }
   .attention { grid-template-columns: 1fr; }
   .att { border-inline-start: 0; border-top: 1px solid var(--line-soft); }
   .att:first-child { border-top: 0; }

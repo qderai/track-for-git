@@ -17,7 +17,7 @@ const likeEsc = (s) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
  * Pure. The filter of a request (URL search params): range, zone, repositories, team, people, agents, branch, path,
  * text, label. Anything malformed is dropped, never passed on.
  */
-export function parseFilter(params, now = Date.now()) {
+export function parseFilter(params, now = Date.now(), defaultTz = "") {
   const g = (k) => params.get(k);
   const range = RANGES[g("range")] ? g("range") : "7d";
   let to = Number(g("to")) || now + 60_000;
@@ -26,7 +26,7 @@ export function parseFilter(params, now = Date.now()) {
   from = Math.max(from, to - 400 * DAY);
   return {
     range, from, to,
-    tz: validTz(g("tz")) ? g("tz") : "UTC",
+    tz: validTz(g("tz")) ? g("tz") : validTz(defaultTz) ? defaultTz : "UTC",
     repos: words(g("repos"), 200).map(id).filter(Boolean),
     team: (g("team") ?? "").slice(0, 80) || null,
     authors: words(g("author"), 30).map((s) => s.toLowerCase().slice(0, 80)),
@@ -105,7 +105,7 @@ const commitOut = (c) => ({
  * timeline (lanes by repository, person or team, bins stacked by who), deploys and releases, and what needs attention.
  */
 export async function overview(store, f, opts) {
-  const { now = Date.now(), staleDays = 7, group = "repo", custom = [] } = opts ?? {};
+  const { now = Date.now(), staleDays = 7, group = "repo", custom = [], extraMarkers = [] } = opts ?? {};
   const cw = commitWhere(f);
   const span = f.to - f.from;
   const prev = commitWhere({ ...f, from: f.from - span, to: f.from });
@@ -131,6 +131,7 @@ export async function overview(store, f, opts) {
 
   const total = Number(tiles?.commits ?? 0);
   const whoRows = who.map((r) => ({ id: kindOf(r), name: r.agent ? agentName(r.agent, custom) : null, commits: Number(r.n), people: Number(r.people) }));
+  const extra = inRange(extraMarkers, f);
   return {
     range: { from: f.from, to: f.to, tz: f.tz },
     tiles: {
@@ -138,11 +139,12 @@ export async function overview(store, f, opts) {
       pushes: Number(pushTiles?.n ?? 0), additions: Number(tiles?.additions ?? 0), deletions: Number(tiles?.deletions ?? 0),
       agentCommits: Number(tiles?.agent ?? 0), prsOpened: Number(prTiles?.opened ?? 0), prsMerged: Number(prTiles?.merged ?? 0),
       prsMergedPrev: Number(prTiles?.mergedPrev ?? 0), openPrs: Number(prTiles?.open ?? 0), stuckPrs: Number(prTiles?.stuck ?? 0),
-      deploys: Number(markerTiles?.deploys ?? 0), releases: Number(markerTiles?.releases ?? 0),
+      deploys: Number(markerTiles?.deploys ?? 0) + extra.filter((m) => m.kind === "deploy").length,
+      releases: Number(markerTiles?.releases ?? 0) + extra.filter((m) => m.kind === "release").length,
     },
     who: whoRows,
     timeline: await timeline(store, f, group),
-    markers: await markers(store, f),
+    markers: await markers(store, f, extra),
     attention: await attention(store, f, stale),
   };
 }
@@ -194,15 +196,46 @@ export async function timeline(store, f, group = "repo") {
   return { group, binMs: size, lanes, bins: [...bins.values()].sort((a, b) => a.t - b.t) };
 }
 
-/** Deploys, releases and tags of the range (the newest 400). */
-async function markers(store, f) {
+/** Pure. The embedder's own markers (src/app.js hookMarkers, already shaped like markers()'s) inside the filter. */
+const inRange = (list, f) => list.filter((m) => m.at >= f.from && m.at < f.to && (!f.repos.length || f.repos.includes(m.repo)));
+
+/**
+ * Deploys, releases and tags of the range (the newest 400), and among them the embedder's own deploys from outside
+ * GitHub (`extra`, from hooks.markers), which are never stored.
+ */
+async function markers(store, f, extra = []) {
   const rows = await store.all(
     `SELECT m.id, m.repo_id, r.full_name, m.kind, m.name, m.environment, m.state, m.sha, m.at, m.finished_at, m.actor, m.url, m.prerelease
        FROM markers m JOIN repos r ON r.id = m.repo_id
       WHERE COALESCE(m.finished_at, m.at) >= ? AND COALESCE(m.finished_at, m.at) < ?${f.repos.length ? ` AND m.repo_id IN (${marks(f.repos)})` : ""}
       ORDER BY COALESCE(m.finished_at, m.at) DESC LIMIT 400`, f.from, f.to, ...f.repos);
-  return rows.map((m) => ({ id: m.id, repo: Number(m.repo_id), repoName: m.full_name, kind: m.kind, name: m.name, environment: m.environment, state: m.state,
+  const own = rows.map((m) => ({ id: m.id, repo: Number(m.repo_id), repoName: m.full_name, kind: m.kind, name: m.name, environment: m.environment, state: m.state,
     sha: m.sha, at: Number(m.finished_at ?? m.at), actor: m.actor, url: m.url, prerelease: !!m.prerelease }));
+  return extra.length ? [...own, ...inRange(extra, f)].sort((a, b) => b.at - a.at).slice(0, 400) : own;
+}
+
+/** Deploy states that mean "this is what runs now". */
+const LIVE_STATES = ["success", "active"];
+
+/**
+ * What runs now, when the embedder does not say (hooks.live): the newest successful deploy, stored or the
+ * embedder's own, preferring a production environment. Null when nothing was ever deployed.
+ */
+export async function liveNow(store, extra = []) {
+  // The newest production deploy and the newest of any kind, each on its own: previews (one per pull request push)
+  // can outnumber production many times over, so a short list of the newest would lose it.
+  const sel = `SELECT m.repo_id, r.full_name, m.name, m.environment, m.sha, COALESCE(m.finished_at, m.at) AS at, m.url FROM markers m JOIN repos r ON r.id = m.repo_id
+      WHERE m.kind = 'deploy' AND m.state IN (${marks(LIVE_STATES)}) AND m.sha IS NOT NULL`;
+  const [prod, any] = await Promise.all([
+    store.all(`${sel} AND LOWER(COALESCE(m.environment, '')) LIKE 'prod%' ORDER BY COALESCE(m.finished_at, m.at) DESC LIMIT 1`, ...LIVE_STATES),
+    store.all(`${sel} ORDER BY COALESCE(m.finished_at, m.at) DESC LIMIT 1`, ...LIVE_STATES),
+  ]);
+  const all = [
+    ...[...prod, ...any].map((m) => ({ repo: Number(m.repo_id), repoName: m.full_name, name: m.name, environment: m.environment, sha: m.sha, at: Number(m.at), url: m.url })),
+    ...extra.filter((m) => m.kind === "deploy" && LIVE_STATES.includes(m.state) && m.sha),
+  ].sort((a, b) => b.at - a.at);
+  const pick = all.find((m) => /^prod/i.test(m.environment ?? "")) ?? all[0];
+  return pick ? { repo: pick.repo, repoName: pick.repoName, sha: pick.sha, environment: pick.environment ?? null, name: pick.name ?? null, at: pick.at, url: pick.url ?? null } : null;
 }
 
 /** What a manager should look at: stuck pull requests, failing CI, changes requested (five of each). */
@@ -356,7 +389,7 @@ export async function prRowOut(store, repoId, number) {
  * The calm version for people who do not read diffs: one card per day of the range (31 at most), newest first: how
  * much happened, who, the busiest repositories, the pull requests merged, what was deployed and released.
  */
-export async function story(store, f, custom = []) {
+export async function story(store, f, custom = [], extraMarkers = []) {
   const from = Math.max(f.from, f.to - 31 * DAY);
   const g = { ...f, from };
   const days = new Map();
@@ -379,7 +412,7 @@ export async function story(store, f, custom = []) {
   const merged = await store.all(`SELECT p.*, r.full_name, pe.name AS author_name, NULL AS ci FROM prs p JOIN repos r ON r.id = p.repo_id LEFT JOIN people pe ON pe.login = p.author_login WHERE ${pw.where} AND p.merged = 1 AND p.merged_at >= ? AND p.merged_at < ?
                                   ORDER BY p.merged_at DESC LIMIT 600`, ...pw.binds, from, f.to);
   for (const p of merged) day(dayNumber(f.tz, Number(p.merged_at))).merged.push(prOut(p));
-  const ms = await markers(store, g);
+  const ms = await markers(store, g, extraMarkers);
   for (const m of ms) if (m.kind !== "tag") day(dayNumber(f.tz, m.at))[m.kind === "deploy" ? "deploys" : "releases"].push(m);
   const out = [...days.entries()].sort((a, b) => b[0] - a[0]).map(([, v]) => ({
     ...v,

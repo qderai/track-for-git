@@ -1,9 +1,17 @@
 {
   "name": "track-for-git",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A calm, real-time dashboard of your organisation's GitHub activity: every commit, push and pull request, who made it (and with which AI agent), what changed and what shipped. Self-hosted on Cloudflare Workers + D1, or Node.",
   "type": "module",
+  "exports": {
+    ".": "./src/app.js",
+    "./embed": { "types": "./src/embed.d.ts", "default": "./src/embed.js" },
+    "./src/*": "./src/*",
+    "./server/*": "./server/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["src", "public", "migrations", "server", "docs/setup.md", "LICENSE", "NOTICE", "README.md"],
   "license": "Apache-2.0",
   "author": "Qder AI (https://qder.ai)",
   "repository": { "type": "git", "url": "git+https://github.com/qderai/track-for-git.git" },
@@ -16,7 +24,8 @@
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "build:embed": "node scripts/build-embed.mjs"
   },
   "cloudflare": {
     "bindings": {

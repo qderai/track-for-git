@@ -5,7 +5,7 @@
  * freeze the page. Lock files, generated output and very long diffs start folded; small changes start open.
  */
 import { clear, h } from "./dom.js";
-import { num, t } from "./i18n.js";
+import { clock, num, t } from "./i18n.js";
 import { GENERATED, parsePatch } from "./lib.js";
 
 const CHUNK = 400;
@@ -18,7 +18,7 @@ const CHUNK = 400;
 export function drawFiles(box, d, o = {}) {
   clear(box);
   if (!d.files) {
-    const why = d.filesError === "rate_limited" ? t("diff.rate", { at: new Date(d.retryAt).toLocaleTimeString() }) : d.filesError === "gone" ? t("diff.gone") : t("diff.error");
+    const why = d.filesError === "rate_limited" ? t("diff.rate", { at: clock(d.retryAt) }) : d.filesError === "gone" ? t("diff.gone") : t("diff.error");
     box.append(h("p", { class: "note warn" }, t("diff.unavailable", { why })));
     return;
   }

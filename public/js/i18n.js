@@ -32,6 +32,40 @@ export function setLocale(preferred = (globalThis.navigator?.languages ?? ["en"]
 export const timeZone = () => tz;
 export const locale = () => lang;
 
+/** The team's own zone instead of the browser's (the TIME_ZONE setting); a name this browser does not know is ignored. */
+export function setTimeZone(zone) {
+  try { new Intl.DateTimeFormat("en", { timeZone: zone }); } catch { return tz; }
+  if (zone && zone !== tz) { tz = zone; fmtCache.clear(); }
+  return tz;
+}
+
+/** The zone's offset from UTC at an instant, in milliseconds. */
+function offsetAt(at) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(new Date(at)).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(at / 1000) * 1000;
+}
+
+/** The YYYY-MM-DD day an instant falls on in the zone shown. */
+const dayOf = (at) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+
+/**
+ * The instant a YYYY-MM-DD day starts in the zone shown. Midnight read with the offset before it and with the offset
+ * after it; the earlier of the two that really is on that day. (Where summer time starts at midnight the day begins
+ * at 01:00, and only one of the two is on it.)
+ */
+export function dayStart(label) {
+  const [y, m, d] = String(label).split("-").map(Number);
+  const local = Date.UTC(y, m - 1, d);
+  const first = local - offsetAt(local);
+  const second = local - offsetAt(first);
+  const on = [first, second].filter((at) => dayOf(at) === label).sort((a, b) => a - b);
+  return on[0] ?? Math.min(first, second);
+}
+
+/** The YYYY-MM-DD day after a YYYY-MM-DD day. */
+export const dayAfter = (label) => { const [y, m, d] = String(label).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10); };
+
 /** A message with {placeholders}; an object message is chosen by the plural of `vars.n`. */
 export function t(key, vars = {}) {
   let m = messages[key] ?? en[key] ?? key;

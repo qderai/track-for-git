@@ -17,19 +17,45 @@ import { demoFiles, demoTick, ensureDemo } from "./demo.js";
 import { commitFiles, prFiles, shapeFiles } from "./diff.js";
 import { GitHubError, RateLimited, createGitHub } from "./github/client.js";
 import { json, makeCache, text } from "./http.js";
-import { commitPage, commitRow, facets, heatmap, overview, parseFilter, prPage, prRowOut, pushPage, story } from "./queries.js";
+import { commitPage, commitRow, facets, heatmap, liveNow, overview, parseFilter, prPage, prRowOut, pushPage, story } from "./queries.js";
 import { runSync } from "./sync.js";
 import { ingest, readBody, verifySignature } from "./webhook.js";
 
+const SHA = /^[0-9a-f]{40}$/;
+const DAY = 86_400_000;
+/** How long the dashboard waits for an embedder's hook before going on without it. */
+export const HOOK_MS = 3_000;
+const cap = (v, n) => (v == null || v === "" ? null : String(v).slice(0, n));
+/** A hook's answer, or an error after HOOK_MS: a hook that never answers must not hold the page. */
+function inTime(p, what, ms = HOOK_MS) {
+  let timer;
+  const late = new Promise((_, no) => { timer = setTimeout(() => no(new Error(`${what} did not answer in ${ms} ms`)), ms); });
+  return Promise.race([Promise.resolve(p), late]).finally(() => clearTimeout(timer));
+}
+const httpsUrl = (v) => (typeof v === "string" && /^https:\/\/[^\s"<>]+$/.test(v) ? v.slice(0, 500) : null);
+
+/** Pure. "/", or a path that starts and ends with "/" ("/tools/code/"). Anything else is "/". */
+export function normalBase(base) {
+  const b = String(base ?? "/").trim();
+  if (!/^\/[\w\-./]*$/.test(b) || b.includes("//") || b.includes("/../") || b.endsWith("/..")) return "/";
+  return b.endsWith("/") ? b : `${b}/`;
+}
+
 /**
- * @param {{ env: Record<string, any>, store: any, edgeCache?: any, fetchImpl?: typeof fetch, waitUntil?: (p: Promise<any>) => void }} platform
+ * @param {{ env: Record<string, any>, store: any, edgeCache?: any, fetchImpl?: typeof fetch, waitUntil?: (p: Promise<any>) => void,
+ *   base?: string, hooks?: { markers?: (range: { from: number, to: number }) => any, live?: () => any } }} platform
+ *   `base` and `hooks` are for an app that mounts Track for Git inside itself (src/embed.js): hooks.markers adds
+ *   deploys that are not GitHub Deployments (from its own pipeline), hooks.live says what runs now.
  */
 export function createApp(platform) {
-  const cfg = readConfig(platform.env);
+  const cfg = { ...readConfig(platform.env), base: normalBase(platform.base) };
   const store = platform.store;
+  const hooks = platform.hooks ?? {};
+  const hookMs = Number(platform.hookMs) > 0 ? Number(platform.hookMs) : HOOK_MS;
   const fetchImpl = platform.fetchImpl ?? ((...a) => fetch(...a));
   const waitUntil = platform.waitUntil ?? ((p) => { p.catch(() => undefined); });
-  const cache = platform.cache ?? makeCache(platform.edgeCache ?? null);
+  // Its own corner of a shared cache: two dashboards in one Worker (two bases, two organisations) never see each other's.
+  const cache = platform.cache ?? makeCache(platform.edgeCache ?? null, 400, `${cfg.base}|${cfg.demo ? "~demo" : cfg.org}`);
   const demoScale = Number(platform.env.DEMO_SCALE) > 0 ? Math.min(Number(platform.env.DEMO_SCALE), 3) : 1;
 
   const github = async (maxRequests = 12) => createGitHub(cfg, { fetchImpl, rate: (await getJson(store, "rate")) ?? {}, maxRequests });
@@ -51,15 +77,71 @@ export function createApp(platform) {
     return v;
   }
 
+  /**
+   * The embedder's own deploys for a range (hooks.markers), shaped like the stored markers, on the repositories the
+   * dashboard knows. A hook that fails or answers nonsense adds nothing: the dashboard never breaks for it.
+   */
+  async function hookMarkers(range) {
+    if (typeof hooks.markers !== "function") return [];
+    let list;
+    try { list = await inTime(hooks.markers({ from: range.from, to: range.to }), "hooks.markers", hookMs); } catch (e) { console.warn("[track-for-git] hooks.markers:", String(e?.message ?? e).slice(0, 200)); return []; }
+    if (!Array.isArray(list) || !list.length) return [];
+    const ids = await repoIds();
+    const out = [];
+    for (const m of list.slice(0, 2000)) {
+      const repo = ids.get(String(m?.repo ?? "").toLowerCase());
+      const kind = m?.kind === "release" ? "release" : m?.kind === "deploy" || m?.kind == null ? "deploy" : null;
+      const at = Number(m?.finishedAt ?? m?.at);
+      if (!repo || !kind || !Number.isFinite(at) || !m?.id) continue;
+      out.push({ id: `hook:${cap(m.id, 120)}`, repo: repo.id, repoName: repo.full_name, kind, name: cap(m.name, 120), environment: cap(m.environment, 80),
+        state: cap(String(m.state ?? "success").toLowerCase(), 20), sha: SHA.test(String(m.sha)) ? m.sha : null, at, actor: cap(m.actor, 80),
+        url: httpsUrl(m.url), prerelease: false });
+    }
+    return out;
+  }
+  async function repoIds() {
+    const rows = await store.all("SELECT id, full_name FROM repos WHERE removed = 0");
+    return new Map(rows.map((r) => [String(r.full_name).toLowerCase(), { id: Number(r.id), full_name: r.full_name }]));
+  }
+
+  /**
+   * What runs now, whatever range is on screen: the embedder's answer (hooks.live), else the newest successful deploy
+   * of the last 90 days (stored, or the embedder's own), production first. Computed once every few seconds for all.
+   */
+  const live = (now) => memo("live", 10, async () => {
+    let v = null;
+    if (typeof hooks.live === "function") {
+      try {
+        const x = await inTime(hooks.live(), "hooks.live", hookMs);
+        const repo = x ? (await repoIds()).get(String(x.repo ?? "").toLowerCase()) : null;
+        if (repo && SHA.test(String(x.sha))) {
+          v = { repo: repo.id, repoName: repo.full_name, sha: x.sha, environment: cap(x.environment, 80), name: cap(x.name, 120), at: Number.isFinite(Number(x.at)) ? Number(x.at) : null, url: httpsUrl(x.url) };
+        }
+      } catch (e) { console.warn("[track-for-git] hooks.live:", String(e?.message ?? e).slice(0, 200)); }
+    } else {
+      v = await liveNow(store, await hookMarkers({ from: now - 90 * DAY, to: now + 60_000 }));
+    }
+    if (!v) return { live: null };
+    // Stored, it opens in the dashboard; not (yet), it links to GitHub.
+    const known = !!(await store.first("SELECT 1 AS k FROM commits WHERE repo_id = ? AND sha = ?", v.repo, v.sha));
+    return { live: { ...v, known } };
+  }).then((x) => x.live);
+
   async function api(req, url, now) {
     const p = url.pathname;
-    const f = parseFilter(url.searchParams, now);
+    const f = parseFilter(url.searchParams, now, cfg.timeZone);
     const key = `${p}?${[...url.searchParams].sort().map(([k, v]) => `${k}=${v}`).join("&")}`;
     const opts = { now, staleDays: cfg.staleDays, custom: cfg.agents };
 
-    if (p === "/api/overview") return json(await memo(key, 10, () => overview(store, f, { ...opts, group: url.searchParams.get("group") ?? "repo" })));
+    if (p === "/api/overview") {
+      return json(await memo(key, 10, async () => {
+        const extraMarkers = await hookMarkers(f);
+        const [o, l] = await Promise.all([overview(store, f, { ...opts, group: url.searchParams.get("group") ?? "repo", extraMarkers }), live(now)]);
+        return { ...o, live: l };
+      }));
+    }
     if (p === "/api/heatmap") return json(await memo(key, 20, () => heatmap(store, f, url.searchParams.get("by") ?? "repo")));
-    if (p === "/api/story") return json(await memo(key, 30, () => story(store, f, cfg.agents)));
+    if (p === "/api/story") return json(await memo(key, 30, async () => story(store, f, cfg.agents, await hookMarkers(f))));
     if (p === "/api/facets") return json(await memo("facets", cfg.demo ? 30 : 300, () => facets(store, now, cfg.agents)));
     if (p === "/api/commits") return json(await commitPage(store, f, url.searchParams.get("cursor"), 100));
     if (p === "/api/pushes") return json(await pushPage(store, f, url.searchParams.get("cursor"), 100));
@@ -150,21 +232,21 @@ export function createApp(platform) {
             return oauthCallback(req, cfg, (path) => gh.rest(path, { allow: [302, 403, 404] }), fetchImpl);
           }
         }
-        if (p === "/auth/logout") return req.method === "POST" ? signOut() : json({ error: "POST only" }, 405);
+        if (p === "/auth/logout") return req.method === "POST" ? signOut(cfg) : json({ error: "POST only" }, 405);
         if (!p.startsWith("/api/")) return json({ error: "not_found" }, 404);
         if (req.method !== "GET") return json({ error: "GET only" }, 405);
 
         const who = await whoIs(req);
         if (p === "/api/me") {
           if (who.problem) return json({ title: cfg.title, setup: setupState(cfg) });
-          if (who.signIn) return json({ title: cfg.title, auth: cfg.auth, signIn: cfg.auth === "github" ? "/auth/login" : null });
+          if (who.signIn) return json({ title: cfg.title, auth: cfg.auth, signIn: cfg.auth === "github" ? `${cfg.base}auth/login` : null });
           if (cfg.demo) await ensureDemo(store, now, { scale: demoScale });
           return json({ title: cfg.title, org: cfg.demo ? "acme" : cfg.org || null, demo: cfg.demo, auth: cfg.auth || "none", user: who.user.id,
-            staleDays: cfg.staleDays, mode: cfg.mode, webUrl: cfg.demo ? null : cfg.webUrl,
+            staleDays: cfg.staleDays, mode: cfg.mode, webUrl: cfg.demo ? null : cfg.webUrl, timeZone: cfg.timeZone || null,
             agents: cfg.agents.map((a) => ({ id: a.id, name: a.name })) });
         }
         if (who.problem) return json({ error: "setup", problem: who.problem }, 503);
-        if (who.signIn) return json({ error: "signin", signIn: cfg.auth === "github" ? "/auth/login" : null }, 401);
+        if (who.signIn) return json({ error: "signin", signIn: cfg.auth === "github" ? `${cfg.base}auth/login` : null }, 401);
         if (cfg.demo) {
           await ensureDemo(store, now, { scale: demoScale });
           waitUntil(demoTick(store, now));

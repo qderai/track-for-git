@@ -20,10 +20,14 @@ export function whoName(who, names = {}) {
 }
 export const fillOf = (who) => { const sl = slotOf(who); return sl === "bot" ? "f-bot" : `f-s${sl}`; };
 
-const hourOf = (() => {
-  const f = new Intl.DateTimeFormat("en-GB", { timeZone: timeZone(), hour: "2-digit", hourCycle: "h23" });
-  return (at) => Number(f.format(at));
-})();
+// One formatter per zone: the zone shown can change after the page starts (the TIME_ZONE setting, from /api/me).
+const hourFmts = new Map();
+const hourOf = (at) => {
+  const zone = timeZone();
+  let f = hourFmts.get(zone);
+  if (!f) { f = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", hourCycle: "h23" }); hourFmts.set(zone, f); }
+  return Number(f.format(at));
+};
 
 /** Tick instants in the viewer's zone: every 3 hours for a day, midnights for a week, weekly or fortnightly beyond. */
 function ticks(from, to) {

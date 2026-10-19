@@ -207,6 +207,56 @@ Set `DEMO` to `""` (or remove it) and deploy. The first sync starts within a min
 | `GITHUB_API_URL` | var | GitHub Enterprise Server's API, `https://host/api/v3`. |
 | `MAX_GITHUB_REQUESTS_PER_RUN` | var | GitHub requests per sync run (default 40: the Workers free plan allows 50 requests to outside services per run). |
 | `SYNC_BUDGET_MS` | var | How long one sync run may work (default 25 s). |
+| `TIME_ZONE` | var | The team's own time zone for days and hours, an IANA name (`Asia/Jerusalem`). Empty: each viewer's own. |
 | `TITLE` | var | The page title. |
 | `DEMO`, `DEMO_SCALE` | var | The made-up organisation, and how busy it is (default 1). |
 | `PORT`, `HOST`, `DATABASE_PATH` | env | Node and Docker only. |
+
+## Inside an app you already run
+
+Track for Git can also live inside another Cloudflare Worker (or Node app) at a path of its own, for example an
+internal tools site at `/tools/code/`, on that app's database binding and cron:
+
+```sh
+npm install github:qderai/track-for-git#v0.2.0
+npx wrangler d1 create track-for-git     # a database of its own; apply node_modules/track-for-git/migrations to it
+```
+
+```js
+import { mount, d1Store } from "track-for-git/embed";
+
+const code = (env, ctx) => mount({
+  base: "/tools/code/",
+  env: { GITHUB_ORG: "acme", GITHUB_TOKEN: env.GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET: env.GITHUB_WEBHOOK_SECRET,
+         AUTH: "access", ACCESS_TEAM_DOMAIN: "acme.cloudflareaccess.com", ACCESS_AUD: env.ACCESS_AUD, TIME_ZONE: "Europe/London" },
+  store: d1Store(env.CODE_DB),
+  edgeCache: caches.default,
+  waitUntil: (p) => ctx.waitUntil(p),
+  frameAncestors: "'self'",               // only to show it in a frame of your own pages
+  hooks: {
+    // Deploys that are not GitHub Deployments, from your own pipeline: drawn on the timeline and in the Story.
+    markers: async ({ from, to }) => (await myDeploys(env, from, to)).map((d) => ({
+      id: d.id, repo: "acme/web", kind: "deploy", environment: "production", state: d.ok ? "success" : "failure",
+      sha: d.commit, at: d.started, finishedAt: d.finished })),
+    // What runs now, for the "Live now" tile (without it: the newest successful deploy).
+    live: async () => ({ repo: "acme/web", sha: await runningCommit(env), environment: "production" }),
+  },
+});
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === "/hooks/github") return code(env, ctx).webhook(request);   // GitHub's webhook, public
+    return (await code(env, ctx).fetch(request)) ?? yourApp(request, env, ctx);    // null: not under /tools/code/
+  },
+  async scheduled(_event, env, ctx) { ctx.waitUntil(code(env, ctx).scheduled()); },  // once a minute
+};
+```
+
+The page and its files come with the package as strings (`src/embed-assets.js`), so there is no build step and no
+static-file setup. Who may open it is still `AUTH`: with `access` the dashboard checks Access's token itself;
+`none` only when your own sign-in already stands in front of every path under `base`. `src/embed.d.ts` has the
+types. A hook that throws, answers nonsense or takes longer than three seconds adds nothing, so your pipeline can never
+break the dashboard. In a frame of another site (`frameAncestors` naming another origin), `AUTH=github` cannot sign
+anyone in: browsers keep the sign-in cookies out of a cross-site frame and GitHub's page refuses to load in one; use
+`access`, or your own sign-in with `none`.

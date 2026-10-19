@@ -8,14 +8,24 @@
 import { drawHeatmap, drawLegend, drawTimeline, drawWho, fillOf, spanText, whoName } from "./charts.js";
 import { drawFiles } from "./diffview.js";
 import { $, $$, clear, h, hideTip, icon, initTooltips, pref, setPref } from "./dom.js";
-import { ago, dateTime, dayWords, duration, num, pct, setLocale, signed, t, timeZone } from "./i18n.js";
+import { ago, dateTime, dayAfter, dayStart, dayWords, duration, num, pct, setLocale, setTimeZone, signed, t, timeZone } from "./i18n.js";
 import { apiQuery, initials, paramsFromState, stateFromParams, whoOf } from "./lib.js";
 import { closePicker, openPicker } from "./picker.js";
 import { VirtualList } from "./virtual-list.js";
 
 setLocale();
-const tz = timeZone();
-let state = stateFromParams(new URLSearchParams(location.search));
+/**
+ * Where the dashboard lives: "/" of its own host, or a path inside another app (src/embed.js). Every address the
+ * page asks for is built from it, never from the host's root.
+ */
+const ROOT = new URL("../", import.meta.url);
+const at = (path) => new URL(String(path).replace(/^\/+/, ""), ROOT).href;
+/** Asked by an app that shows the page inside itself: no top bar of its own (embed=1), one theme (theme=light|dark). */
+const start = new URLSearchParams(location.search);
+const VIEW = { embed: start.get("embed") === "1", theme: ["light", "dark"].includes(start.get("theme")) ? start.get("theme") : null };
+if (VIEW.embed) document.documentElement.classList.add("embed");
+let tz = timeZone();
+let state = stateFromParams(start);
 let me = null;
 let facets = { repos: [], teams: [], people: [], agents: [], branches: [], labels: [] };
 const names = {};          // agent id → name
@@ -27,7 +37,7 @@ let commitList, pushList, prList;
 
 class HttpError extends Error { constructor(status, body) { super(`HTTP ${status}`); this.status = status; this.body = body; } }
 async function get(path) {
-  const r = await fetch(path, { headers: { accept: "application/json" }, credentials: "same-origin" });
+  const r = await fetch(at(path), { headers: { accept: "application/json" }, credentials: "same-origin" });
   const body = await r.json().catch(() => ({}));
   if (r.status === 401 || r.status === 503) { boot(); throw new HttpError(r.status, body); }
   if (!r.ok) throw new HttpError(r.status, body);
@@ -37,7 +47,10 @@ const q = (extra) => apiQuery(state, tz, extra);
 
 function setState(patch, { push = false, reload = true } = {}) {
   state = { ...state, ...patch, filter: patch.filter ? { ...patch.filter } : state.filter };
-  const p = paramsFromState(state).toString();
+  const params = paramsFromState(state);
+  if (VIEW.embed) params.set("embed", "1");
+  if (VIEW.theme) params.set("theme", VIEW.theme);
+  const p = params.toString();
   const url = `${location.pathname}${p ? `?${p}` : ""}`;
   if (push) history.pushState(null, "", url); else history.replaceState(null, "", url);
   if (reload) render();
@@ -59,9 +72,11 @@ function changed(id, data) {
 // ---------------------------------------------------------------------------------------------------- boot
 
 async function boot() {
-  try { me = await (await fetch("/api/me", { headers: { accept: "application/json" } })).json(); }
+  try { me = await (await fetch(at("api/me"), { headers: { accept: "application/json" } })).json(); }
   catch { document.body.classList.add("ready"); $("#main").replaceChildren(h("p", { class: "note warn" }, t("error.load"))); return; }
   document.body.classList.add("ready");
+  // The team's own zone (TIME_ZONE), when the dashboard has one: every day and hour is drawn in it.
+  if (me.timeZone) tz = setTimeZone(me.timeZone);
   if (me.setup) return renderSetup(me.setup);
   if (!me.user && me.auth && me.auth !== "none" && !me.org) return renderSignIn();
   document.title = me.title;
@@ -72,15 +87,15 @@ async function boot() {
   $("#banner").hidden = !(me.demo || me.auth === "none");
   $("#banner").textContent = me.demo ? t("demo.banner") : t("open.banner");
   $("#signout").hidden = me.auth !== "github";
-  get("/api/facets").then((f) => { facets = f; for (const a of f.agents) names[a.id] ??= a.name; for (const r of f.repos) repoName.set(String(r.id), r.name); drawFilters(); }).catch(() => undefined);
+  get("api/facets").then((f) => { facets = f; for (const a of f.agents) names[a.id] ??= a.name; for (const r of f.repos) repoName.set(String(r.id), r.name); drawFilters(); }).catch(() => undefined);
   status();
   render();
 }
 
 /** "Built by Qder.ai", with the logo, for the screens before the dashboard. */
 const builtBy = () => h("a", { class: "built", href: "https://qder.ai", rel: "noopener" }, h("span", null, t("app.builtBy")),
-  h("img", { class: "qder on-light", src: "/brand/qder-lockup-ltr-cobalt.svg", alt: "Qder.ai", width: "98", height: "20" }),
-  h("img", { class: "qder on-dark", src: "/brand/qder-lockup-ltr-white.svg", alt: "Qder.ai", width: "98", height: "20" }));
+  h("img", { class: "qder on-light", src: at("brand/qder-lockup-ltr-cobalt.svg"), alt: "Qder.ai", width: "98", height: "20" }),
+  h("img", { class: "qder on-dark", src: at("brand/qder-lockup-ltr-white.svg"), alt: "Qder.ai", width: "98", height: "20" }));
 
 /**
  * GitHub's "new App" page with everything filled in: read-only permissions, the events, this dashboard's webhook
@@ -90,11 +105,11 @@ function appLink(org) {
   const u = new URL(`https://github.com/organizations/${encodeURIComponent(org)}/settings/apps/new`);
   const p = u.searchParams;
   p.set("name", `Track for Git (${org})`.slice(0, 34));
-  p.set("url", location.origin);
+  p.set("url", ROOT.href);
   p.set("public", "false");
   p.set("webhook_active", "true");
-  p.set("webhook_url", `${location.origin}/api/github/webhook`);
-  p.append("callback_urls[]", `${location.origin}/auth/callback`);
+  p.set("webhook_url", at("api/github/webhook"));
+  p.append("callback_urls[]", at("auth/callback"));
   for (const perm of ["contents", "metadata", "pull_requests", "deployments", "statuses", "checks", "members"]) p.set(perm, "read");
   for (const e of ["push", "pull_request", "pull_request_review", "check_suite", "status", "deployment", "deployment_status", "release", "create", "delete", "repository"]) p.append("events[]", e);
   return u.toString();
@@ -204,7 +219,9 @@ function initToolbar() {
     $("#theme").title = t(`theme.${v}`);
     $("#theme use").setAttribute("href", `#i-${v === "auto" ? "contrast" : v === "light" ? "sun" : "moon"}`);
   };
-  applyTheme(pref("theme", "auto"));
+  // An app showing the page inside itself may fix the theme (theme=light|dark): then there is nothing to switch.
+  if (VIEW.theme) { applyTheme(VIEW.theme); $("#theme").hidden = true; }
+  else applyTheme(pref("theme", "auto"));
   $("#theme").addEventListener("click", () => { const next = themes[(themes.indexOf(pref("theme", "auto")) + 1) % 3]; setPref("theme", next); applyTheme(next); });
   $("#status").addEventListener("click", () => openStatus());
 }
@@ -237,10 +254,10 @@ function failed(box, e) {
 async function loadOverview() {
   const range = rangeOf();
   let d;
-  try { d = await get(`/api/overview?${q({ group: state.group })}`); } catch (e) { return failed($("#tiles"), e); }
+  try { d = await get(`api/overview?${q({ group: state.group })}`); } catch (e) { return failed($("#tiles"), e); }
   if (state.tab !== "overview") return;
   for (const w of d.who) if (w.name) names[w.id] ??= w.name;
-  if (changed("tiles", d.tiles)) drawTiles(d.tiles);
+  if (changed("tiles", [d.tiles, d.live, Math.floor(Date.now() / 60_000)])) drawTiles(d.tiles, d.live);
   if (changed("timeline", [d.timeline, d.markers, state.group, Math.floor(Date.now() / 60_000), $("#timeline").clientWidth])) {
     drawTimeline($("#timeline"), d.timeline, { from: range.from, to: range.to, group: state.group, markers: d.markers, names, onPick: pickBin });
     drawLegend($("#legend"), [...new Set(d.timeline.bins.flatMap((b) => Object.keys(b.who)).map((k) => (k === "~human" || k === "~bot" || ["claude", "codex", "grok", "copilot", "gemini", "cursor"].includes(k) ? k : "~other")))], names);
@@ -263,14 +280,30 @@ function rangeOf() {
   return { from: to - days * 86_400_000, to };
 }
 
-function drawTiles(x) {
+/**
+ * "Live now": the commit that runs in production, from the newest successful deploy or the app that mounts the page
+ * (hooks.live). Stored, it opens here; not yet stored, on GitHub.
+ */
+function liveTile(l) {
+  if (!l) return null;
+  const parts = [h("p", { class: "tl-l" }, t("tile.live")), h("p", { class: "tl-v mono" }, l.sha.slice(0, 7)),
+    h("p", { class: "tl-s" }, [l.environment, l.at ? ago(l.at) : null].filter(Boolean).join(" · ") || short(l.repoName))];
+  const title = t("tile.liveTitle", { name: l.name ?? l.sha.slice(0, 10), repo: short(l.repoName) });
+  if (l.known) return h("button", { type: "button", class: "tile go live", title, onclick: () => setState({ tab: "commits", sel: `${l.repo}:${l.sha}` }, { push: true }) }, parts);
+  const url = l.url ?? (me.webUrl && l.repoName ? `${me.webUrl}/${l.repoName}/commit/${l.sha}` : null);
+  return url ? h("a", { class: "tile go live", href: url, target: "_blank", rel: "noopener noreferrer", title }, parts) : h("div", { class: "tile live", title }, parts);
+}
+
+function drawTiles(x, live) {
   const delta = (cur, prev) => {
     if (!prev && !cur) return null;
     const d = prev ? (cur - prev) / prev : 1;
     return h("span", { class: `delta ${d > 0.02 ? "up" : d < -0.02 ? "down" : ""}` }, t("tile.vsPrev", { delta: prev ? signed(Math.round(d * 100)) + "%" : signed(cur) }));
   };
   const tile = (label, value, sub, extra) => h("div", { class: "tile" }, h("p", { class: "tl-l" }, label), h("p", { class: "tl-v" }, value), sub ? h("p", { class: "tl-s" }, sub) : null, extra ?? null);
+  $("#tiles").classList.toggle("with-live", !!live);
   clear($("#tiles")).append(
+    ...(live ? [liveTile(live)] : []),
     tile(t("tile.commits"), num(x.commits, true), t("tile.lines", { add: num(x.additions, true), del: num(x.deletions, true) }), delta(x.commits, x.commitsPrev)),
     tile(t("tile.merged"), num(x.prsMerged, true), null, delta(x.prsMerged, x.prsMergedPrev)),
     h("button", { type: "button", class: "tile go", onclick: () => setState({ tab: "prs", prState: x.stuckPrs ? "stuck" : "open", sel: "" }, { push: true }) },
@@ -310,11 +343,12 @@ function drawAttention(a) {
 async function loadHeat() {
   for (const b of $$("[data-heat]")) b.setAttribute("aria-pressed", String(b.dataset.heat === state.heat));
   let d;
-  try { d = await get(`/api/heatmap?${q({ by: state.heat })}`); } catch (e) { return failed($("#heat"), e); }
+  try { d = await get(`api/heatmap?${q({ by: state.heat })}`); } catch (e) { return failed($("#heat"), e); }
   if (!changed("heat", [d, $("#heat").clientWidth, heatTable])) return;
   drawHeatmap($("#heat"), d, { table: heatTable, onPick: (row, col, unit) => {
-    const from = unit === "hour" ? col : new Date(`${col}T00:00:00`).getTime();
-    const to = unit === "hour" ? col + 3_600_000 : new Date(new Date(`${col}T00:00:00`).getTime() + 26 * 3_600_000).setHours(0, 0, 0, 0);
+    // A day is the day in the zone shown (the team's TIME_ZONE or this browser's), midnight to midnight.
+    const from = unit === "hour" ? col : dayStart(col);
+    const to = unit === "hour" ? col + 3_600_000 : dayStart(dayAfter(col));
     const patch = { from: String(from), to: String(to) };
     if (state.heat === "repo") patch.repos = row.key; else if (state.heat === "person") patch.author = row.key; else if (row.key !== "~none") patch.team = row.key;
     state = { ...state, tab: "commits", sel: "", filter: { ...state.filter, ...patch } };
@@ -377,12 +411,12 @@ async function loadCommits({ refresh = false } = {}) {
   }
   try {
     if (state.list === "pushes") {
-      const d = await get(`/api/pushes?${q()}`);
+      const d = await get(`api/pushes?${q()}`);
       pushNext = d.next;
       if (changed("pushes", [d.items.map((p) => p.id), q()])) pushList.set(d.items, { hasMore: !!d.next, keepActive: refresh });
       $("#list-count").textContent = "";
     } else {
-      const d = await get(`/api/commits?${q()}`);
+      const d = await get(`api/commits?${q()}`);
       const key = q();
       const top = commitList.items[0];
       if (refresh && sigs.commitsQuery === key && top && commitList.el.scrollTop > 64) {
@@ -413,14 +447,14 @@ function newer(n, d) {
 }
 async function moreCommits() {
   if (!commitNext) return;
-  const d = await get(`/api/commits?${q({ cursor: commitNext })}`).catch(() => null);
+  const d = await get(`api/commits?${q({ cursor: commitNext })}`).catch(() => null);
   if (!d) { commitList.loading = false; return; }
   commitNext = d.next;
   commitList.append(d.items, !!d.next);
 }
 async function morePushes() {
   if (!pushNext) return;
-  const d = await get(`/api/pushes?${q({ cursor: pushNext })}`).catch(() => null);
+  const d = await get(`api/pushes?${q({ cursor: pushNext })}`).catch(() => null);
   if (!d) { pushList.loading = false; return; }
   pushNext = d.next;
   pushList.append(d.items, !!d.next);
@@ -436,11 +470,12 @@ async function openCommit(sel) {
   clear(box).append(backButton(), h("p", { class: "note" }, t("diff.loading")));
   showDetail(true, "commit");
   let d;
-  try { d = await get(`/api/commits/${repo}/${sha}`); } catch (e) { if (seq === openSeq) failed(box, e); return; }
+  try { d = await get(`api/commits/${repo}/${sha}`); } catch (e) { if (seq === openSeq) failed(box, e); return; }
   if (seq !== openSeq) return;
   const [subject, ...body] = String(d.message ?? d.subject ?? "").split("\n");
   const copy = h("button", { type: "button", class: "btn ghost sm mono", "aria-label": t("commit.copy"), onclick: async (e) => { try { await navigator.clipboard.writeText(d.sha); e.target.closest("button").lastChild.textContent = t("commit.copied"); } catch { /* not allowed */ } } }, icon("copy"), h("span", null, d.sha.slice(0, 10)));
-  clear(box).append(
+  // The DOM's own append prints a missing part as the word "null": the empty parts are left out first.
+  clear(box).append(...[
     backButton(),
     h("header", { class: "d-head" },
       h("h2", { id: "detail-title", tabindex: "-1" }, subject || "(no message)"),
@@ -451,7 +486,7 @@ async function openCommit(sel) {
         d.pr ? h("button", { type: "button", class: "link", onclick: () => setState({ tab: "prs", prState: "all", sel: `${d.repo}#${d.pr}` }, { push: true }) }, t("commit.pr", { n: d.pr })) : null),
       h("p", { class: "d-actions" }, copy, d.files ? h("span", { class: "stat" }, t("commit.files", { n: d.filesTotal ?? d.files.length }), " ", lines(d.additions, d.deletions)) : null, ghLink(d.url ?? commitUrl(d), t("commit.onGithub")))),
     body.join("\n").trim() ? h("pre", { class: "msg" }, body.join("\n").trim()) : null,
-    h("div", { class: "files" }));
+    h("div", { class: "files" })].filter(Boolean));
   drawFiles(box.querySelector(".files"), d);
   if (matchMedia("(max-width: 899px)").matches) $("#detail-title").focus({ preventScroll: false });
 }
@@ -500,7 +535,7 @@ async function loadPrs({ refresh = false } = {}) {
   $("#pr-sort").value = state.prSort;
   if (!prList) prList = new VirtualList($("#pr-list"), { id: "p", label: t("pr.aria"), key: (p) => `${p.repo}#${p.number}`, render: prRow, onOpen: (p) => setState({ sel: `${p.repo}#${p.number}` }), onMore: () => morePrs() });
   let d;
-  try { d = await get(`/api/prs?${q({ state: state.prState, sort: state.prSort })}`); } catch (e) { return failed($("#detail-pr"), e); }
+  try { d = await get(`api/prs?${q({ state: state.prState, sort: state.prSort })}`); } catch (e) { return failed($("#detail-pr"), e); }
   for (const [k, v] of Object.entries(d.counts)) { const el = $(`[data-state="${k}"] .n`); if (el) el.textContent = num(v, true); }
   prNext = d.next;
   const key = q({ state: state.prState, sort: state.prSort });
@@ -514,7 +549,7 @@ async function loadPrs({ refresh = false } = {}) {
 }
 async function morePrs() {
   if (!prNext) return;
-  const d = await get(`/api/prs?${q({ state: state.prState, sort: state.prSort, cursor: prNext })}`).catch(() => null);
+  const d = await get(`api/prs?${q({ state: state.prState, sort: state.prSort, cursor: prNext })}`).catch(() => null);
   if (!d) { prList.loading = false; return; }
   prNext = d.next;
   prList.append(d.items, !!d.next);
@@ -528,10 +563,10 @@ async function openPr(sel) {
   clear(box).append(backButton(), h("p", { class: "note" }, t("diff.loading")));
   showDetail(true, "pr");
   let p;
-  try { p = await get(`/api/prs/${repo}/${number}`); } catch (e) { if (seq === openSeq) failed(box, e); return; }
+  try { p = await get(`api/prs/${repo}/${number}`); } catch (e) { if (seq === openSeq) failed(box, e); return; }
   if (seq !== openSeq) return;
   const age = (p.mergedAt ?? p.closedAt ?? Date.now()) - p.createdAt;
-  clear(box).append(
+  clear(box).append(...[
     backButton(),
     h("header", { class: "d-head" },
       h("h2", { id: "detail-title", tabindex: "-1" }, h("span", { class: "num" }, `#${p.number}`), " ", p.title),
@@ -543,7 +578,7 @@ async function openPr(sel) {
       h("p", { class: "d-actions" }, p.files ? h("span", { class: "stat" }, t("commit.files", { n: p.filesTotal ?? p.files.length }), " ", lines(p.additions, p.deletions)) : null, ghLink(p.url ?? (me.webUrl ? `${me.webUrl}/${p.repoName}/pull/${p.number}` : null), t("commit.onGithub")))),
     p.commits?.length ? h("details", { class: "pr-commits" }, h("summary", null, `${t("pr.commits")} (${num(p.commits.length)})`),
       h("ul", null, p.commits.map((c) => h("li", null, h("button", { type: "button", class: "link", onclick: () => setState({ tab: "commits", sel: `${c.repo}:${c.sha}` }, { push: true }) }, c.subject), h("small", null, ` ${whoText(c)} · ${ago(c.at)}`))))) : null,
-    h("div", { class: "files" }));
+    h("div", { class: "files" })].filter(Boolean));
   drawFiles(box.querySelector(".files"), p);
   if (matchMedia("(max-width: 899px)").matches) $("#detail-title").focus();
 }
@@ -552,7 +587,7 @@ async function openPr(sel) {
 
 async function loadStory() {
   let d;
-  try { d = await get(`/api/story?${q()}`); } catch (e) { return failed($("#story"), e); }
+  try { d = await get(`api/story?${q()}`); } catch (e) { return failed($("#story"), e); }
   if (!changed("story", d)) return;
   const box = clear($("#story"));
   if (!d.days.length) { box.append(h("p", { class: "empty" }, t("story.empty"))); return; }
@@ -584,7 +619,7 @@ async function loadStory() {
 
 let lastStatus = null;
 async function status() {
-  try { lastStatus = await get("/api/status"); } catch { return; }
+  try { lastStatus = await get("api/status"); } catch { return; }
   const s = lastStatus, now = Date.now();
   const pill = $("#status");
   const err = s.sync?.errors?.length;
@@ -607,6 +642,7 @@ function openStatus() {
     const row = (k, v) => body.append(h("dt", null, k), h("dd", null, v));
     row(t("status.mode"), t(`status.mode.${s.setup.mode}`));
     row(t("status.repos"), num(s.repos));
+    row(t("status.tz"), me?.timeZone && tz === me.timeZone ? t("status.tzTeam", { zone: tz }) : t("status.tzYours", { zone: tz }));
     row(t("status.webhook"), s.webhookAt ? `${ago(s.webhookAt)} (${dateTime(s.webhookAt)})` : t("status.never"));
     row(t("status.sync"), s.sync?.at ? `${ago(s.sync.at)} · ${t("status.syncDetail", { repos: num(s.sync.repos ?? 0), ms: num(s.sync.ms ?? 0), requests: num(s.sync.requests ?? 0) })}` : t("status.never"));
     const rates = Object.entries(s.rate ?? {});

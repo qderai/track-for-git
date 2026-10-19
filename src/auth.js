@@ -52,7 +52,9 @@ export async function unseal(secret, sealed) {
   } catch { return null; }
 }
 
-const cookie = (name, value, maxAge) => `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+/** A cookie for this dashboard only: its own path (`base`: "/" unless it is mounted inside another app). */
+const cookie = (name, value, maxAge, path = "/") => `${name}=${value}; Path=${path}; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+const baseOf = (cfg) => cfg?.base ?? "/";
 
 // ---------------------------------------------------------------------------------------------------- Cloudflare Access
 
@@ -103,21 +105,22 @@ export async function sessionUser(req, cfg, now = Date.now()) {
 export async function oauthStart(req, cfg) {
   const url = new URL(req.url);
   const state = b64url(crypto.getRandomValues(new Uint8Array(24)));
-  const back = safeBack(url.searchParams.get("back"));
+  const base = baseOf(cfg);
+  const back = safeBack(url.searchParams.get("back"), base);
   const sealed = await seal(cfg.sessionSecret, { state, back, exp: Date.now() + 10 * 60_000 });
   const to = new URL(`${cfg.webUrl}/login/oauth/authorize`);
   to.searchParams.set("client_id", cfg.oauthClientId);
-  to.searchParams.set("redirect_uri", `${url.origin}/auth/callback`);
+  to.searchParams.set("redirect_uri", `${url.origin}${base}auth/callback`);
   to.searchParams.set("state", state);
   to.searchParams.set("allow_signup", "false");
   // Membership is checked with the dashboard's own credentials; without them (webhooks only) the person's own token
   // must be able to read their memberships.
   if (cfg.mode === "none") to.searchParams.set("scope", "read:org");
-  return new Response(null, { status: 302, headers: { location: to.toString(), "set-cookie": cookie(STATE, sealed, 600), "cache-control": "no-store" } });
+  return new Response(null, { status: 302, headers: { location: to.toString(), "set-cookie": cookie(STATE, sealed, 600, base), "cache-control": "no-store" } });
 }
 
-/** Only a path on this site, never another site. */
-export const safeBack = (v) => (typeof v === "string" && /^\/(?!\/)[\w\-./?=&%#]*$/.test(v) ? v.slice(0, 300) : "/");
+/** Only a path on this site, never another site (else the dashboard's own start, `base`). */
+export const safeBack = (v, base = "/") => (typeof v === "string" && /^\/(?!\/)[\w\-./?=&%#]*$/.test(v) ? v.slice(0, 300) : base);
 
 /**
  * Back from GitHub: check the state, learn who it is, check they are a member, set the session.
@@ -125,15 +128,16 @@ export const safeBack = (v) => (typeof v === "string" && /^\/(?!\/)[\w\-./?=&%#]
  */
 export async function oauthCallback(req, cfg, memberCheck, fetchImpl = fetch) {
   const url = new URL(req.url);
+  const base = baseOf(cfg);
   const saved = await unseal(cfg.sessionSecret, cookies(req)[STATE]);
-  const fail = (msg, status = 403) => new Response(page(msg), { status, headers: { "content-type": "text/html; charset=utf-8", "set-cookie": cookie(STATE, "", 0), "cache-control": "no-store" } });
+  const fail = (msg, status = 403) => new Response(page(msg, base), { status, headers: { "content-type": "text/html; charset=utf-8", "set-cookie": cookie(STATE, "", 0, base), "cache-control": "no-store" } });
   if (!saved || saved.exp < Date.now() || saved.state !== url.searchParams.get("state")) return fail("The sign-in expired or did not start here. Try again.", 400);
   const code = url.searchParams.get("code");
   if (!code) return fail("GitHub did not sign you in.", 400);
   const tr = await fetchImpl(`${cfg.webUrl}/login/oauth/access_token`, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json", "user-agent": "track-for-git" },
-    body: JSON.stringify({ client_id: cfg.oauthClientId, client_secret: cfg.oauthClientSecret, code, redirect_uri: `${url.origin}/auth/callback` }),
+    body: JSON.stringify({ client_id: cfg.oauthClientId, client_secret: cfg.oauthClientSecret, code, redirect_uri: `${url.origin}${base}auth/callback` }),
   });
   const tok = (await tr.json().catch(() => null))?.access_token;
   if (!tok) return fail("GitHub did not sign you in.", 400);
@@ -158,17 +162,17 @@ export async function oauthCallback(req, cfg, memberCheck, fetchImpl = fetch) {
   }
   if (!member) return fail(`@${login} is not a member of ${cfg.org}${cfg.allowedTeams.length ? ` (teams: ${cfg.allowedTeams.join(", ")})` : ""}.`);
   const session = await seal(cfg.sessionSecret, { login, exp: Date.now() + SESSION_MS });
-  const headers = new Headers({ location: safeBack(saved.back), "cache-control": "no-store" });
-  headers.append("set-cookie", cookie(SESSION, session, SESSION_MS / 1000));
-  headers.append("set-cookie", cookie(STATE, "", 0));
+  const headers = new Headers({ location: safeBack(saved.back, base), "cache-control": "no-store" });
+  headers.append("set-cookie", cookie(SESSION, session, SESSION_MS / 1000, base));
+  headers.append("set-cookie", cookie(STATE, "", 0, base));
   return new Response(null, { status: 302, headers });
 }
 
-export const signOut = () => new Response(null, { status: 303, headers: { location: "/", "set-cookie": cookie(SESSION, "", 0), "cache-control": "no-store" } });
+export const signOut = (cfg) => new Response(null, { status: 303, headers: { location: baseOf(cfg), "set-cookie": cookie(SESSION, "", 0, baseOf(cfg)), "cache-control": "no-store" } });
 
 /** A plain page for sign-in problems. Text only, escaped. */
-function page(msg) {
+function page(msg, base = "/") {
   const esc = String(msg).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Track for Git</title>
-<link rel="stylesheet" href="/styles.css"><main class="signin"><h1>Track for Git</h1><p>${esc}</p><p><a class="btn" href="/auth/login">Sign in with GitHub</a></p></main>`;
+<link rel="stylesheet" href="${base}styles.css"><main class="signin"><h1>Track for Git</h1><p>${esc}</p><p><a class="btn" href="${base}auth/login">Sign in with GitHub</a></p></main>`;
 }

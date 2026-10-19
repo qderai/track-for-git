@@ -5,6 +5,7 @@
  * is set.
  */
 import { parseAgents } from "./agents.js";
+import { validTz } from "./time.js";
 
 const str = (v) => (typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim());
 const list = (v) => str(v).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
@@ -57,7 +58,12 @@ export function readConfig(env = {}) {
     backfillDays: int(env.BACKFILL_DAYS, 30, 1, 365),
     maxRequests: int(env.MAX_GITHUB_REQUESTS_PER_RUN, 40, 5, 900),
     budgetMs: int(env.SYNC_BUDGET_MS, 25_000, 2_000, 600_000),
+    // The team's own time zone for days and hours (an IANA name, "Asia/Jerusalem"); unset, each viewer's own.
+    timeZone: validTz(str(env.TIME_ZONE)) ? str(env.TIME_ZONE) : "",
     title: str(env.TITLE) || "Track for Git",
+    // Where the dashboard lives on its host: "/" on its own, a path such as "/tools/code/" when mounted inside
+    // another app (src/embed.js sets it).
+    base: "/",
   };
 }
 

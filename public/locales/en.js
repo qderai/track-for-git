@@ -70,6 +70,9 @@ export default {
   "status.rate": "GitHub allowance left",
   "status.rateLine": "{resource}: {remaining} of {limit}, resets {at}",
   "status.repos": "Repositories watched",
+  "status.tz": "Times shown in",
+  "status.tzTeam": "{zone} (the team's time zone)",
+  "status.tzYours": "{zone} (your browser's)",
   "status.errors": "Problems",
   "status.never": "never",
   "status.close": "Close",
@@ -91,6 +94,8 @@ export default {
   "tile.repos": { "one": "in {n} repository", "other": "in {n} repositories" },
   "tile.agents": "Written with AI agents",
   "tile.agentsSub": { "one": "{n} commit", "other": "{n} commits" },
+  "tile.live": "Live now",
+  "tile.liveTitle": "{name} runs in {repo}: open its commit",
   "tile.vsPrev": "{delta} vs the previous period",
   "tile.lines": "+{add} −{del} lines",
 
