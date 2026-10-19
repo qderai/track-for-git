@@ -103,6 +103,39 @@ test("AUTH=access: Cloudflare Access's JWT is verified, not trusted", async () =
   assert.equal(await accessUser(req(jwt({ aud: ["aud-123"], iss: `https://${team}`, exp }, other)), cfg, fetchImpl), null);
 });
 
+test("AUTH=access: after Access rotates its keys the new kid is fetched at once, at most once a minute", async () => {
+  const pair = (kid) => { const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 }); return { kid, privateKey, jwk: { ...publicKey.export({ format: "jwk" }), kid, alg: "RS256" } }; };
+  const k1 = pair("k1"), k2 = pair("k2"), k9 = pair("k9");
+  const team = "rotate.cloudflareaccess.com";
+  const cfg = readConfig({ AUTH: "access", ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: "aud-123" });
+  let published = [k1.jwk];
+  const fetchImpl = fakeFetch([[`https://${team}/cdn-cgi/access/certs`, () => ({ body: { keys: published } })]]);
+  const t0 = Date.now();
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const jwt = ({ kid, privateKey }) => {
+    const head = b64({ alg: "RS256", kid }), body = b64({ aud: ["aud-123"], iss: `https://${team}`, exp: Math.floor(t0 / 1000) + 3600, email: "dana@acme.example" });
+    return `${head}.${body}.${createSign("RSA-SHA256").update(`${head}.${body}`).sign(privateKey).toString("base64url")}`;
+  };
+  const as = (key, at) => accessUser(new Request("https://dash.example/", { headers: { "cf-access-jwt-assertion": jwt(key) } }), cfg, fetchImpl, at);
+  const dana = { id: "dana@acme.example", via: "access" };
+
+  assert.deepEqual(await as(k1, t0), dana);
+  assert.equal(fetchImpl.calls.length, 1);
+  published = [k2.jwk];
+  assert.deepEqual(await as(k2, t0 + 5 * 60_000), dana, "a kid not in the cached set fetches the keys again");
+  assert.equal(fetchImpl.calls.length, 2);
+  assert.deepEqual(await as(k2, t0 + 5 * 60_000 + 10_000), dana);
+  assert.equal(fetchImpl.calls.length, 2, "a known kid uses the cache");
+  // A kid Access never published is refused, and asks again at most once a minute.
+  assert.equal(await as(k9, t0 + 5 * 60_000 + 30_000), null);
+  assert.equal(await as(k9, t0 + 5 * 60_000 + 40_000), null);
+  assert.equal(fetchImpl.calls.length, 2);
+  assert.equal(await as(k9, t0 + 6 * 60_000 + 1), null);
+  assert.equal(fetchImpl.calls.length, 3);
+  assert.equal(await as(k9, t0 + 6 * 60_000 + 30_000), null);
+  assert.equal(fetchImpl.calls.length, 3);
+});
+
 test("the webhook route: signed deliveries in, everything else out", async () => {
   const store = memStore();
   const app = createApp({ env: { GITHUB_ORG: "acme", GITHUB_WEBHOOK_SECRET: "hook-secret", AUTH: "none" }, store });

@@ -1,6 +1,6 @@
 {
   "name": "track-for-git",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "A calm, real-time dashboard of your organisation's GitHub activity: every commit, push and pull request, who made it (and with which AI agent), what changed and what shipped. Self-hosted on Cloudflare Workers + D1, or Node.",
   "type": "module",

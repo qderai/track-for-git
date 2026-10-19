@@ -60,13 +60,17 @@ const baseOf = (cfg) => cfg?.base ?? "/";
 
 const jwks = new Map();
 
-async function accessKeys(team, fetchImpl, now) {
+async function accessKeys(team, kid, fetchImpl, now) {
   const c = jwks.get(team);
-  if (c && c.until > now) return c.keys;
+  if (c && c.until > now) {
+    // A kid outside the set: Access may have rotated its keys. Ask again, at most once a minute per team.
+    if (c.keys.some((k) => k.kid === kid) || now - c.at < 60_000) return c.keys;
+    c.at = now;
+  }
   const r = await fetchImpl(`https://${team}/cdn-cgi/access/certs`);
   if (!r.ok) throw new Error(`Access keys: ${r.status}`);
   const keys = (await r.json())?.keys ?? [];
-  jwks.set(team, { keys, until: now + 3_600_000 });
+  jwks.set(team, { keys, at: now, until: now + 3_600_000 });
   return keys;
 }
 
@@ -86,7 +90,7 @@ export async function accessUser(req, cfg, fetchImpl = fetch, now = Date.now()) 
   if (!aud.some((a) => cfg.accessAud.includes(a))) return null;
   if (body.iss !== `https://${cfg.accessTeam}`) return null;
   if (!(body.exp * 1000 > now) || (body.nbf && body.nbf * 1000 > now + 60_000)) return null;
-  const jwk = (await accessKeys(cfg.accessTeam, fetchImpl, now)).find((k) => k.kid === head.kid);
+  const jwk = (await accessKeys(cfg.accessTeam, head.kid, fetchImpl, now)).find((k) => k.kid === head.kid);
   if (!jwk) return null;
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
   const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, fromB64url(s), enc.encode(`${h}.${p}`));
