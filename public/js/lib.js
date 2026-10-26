@@ -17,6 +17,8 @@ export const STACK = ["~human", "claude", "codex", "grok", "copilot", "gemini", 
 export const stackKey = (who) => (who === "~human" || who === "~bot" || AGENT_SLOTS[who] ? who : "~other");
 
 /** Pure. A commit's or pull request's who: "~human", "~bot" or the agent id. */
+/** The repositories to send for Qubi's scope: none (= all watched) for "All", the ticked ones for "Only these"; null when "Only these" has none ticked (that would silently mean all). */
+export const qubiRepos = (scope, chosen) => (scope === "all" ? [] : chosen.length ? chosen : null);
 export const whoOf = (row) => row.agent ?? (row.bot ? "~bot" : "~human");
 
 /** Pure. Fold a bin's { who: n } into the stack keys, in drawing order. */
