@@ -13,12 +13,13 @@ const DAYS = [0, 1, 2, 3, 4, 5, 6];
 
 let data = null;
 let busy = false;
+let dirty = false;  // settings changed on the page and not saved yet: a refresh would throw them away
 let flash = null;   // { ok, text } after a save or a run
 
 /** Draw (or redraw) the view into `box`. `at` builds this dashboard's own addresses. */
 export async function loadQubi(box, at, { quiet = false } = {}) {
   // A refresh never throws away what someone is typing.
-  if (quiet && (busy || box.contains(document.activeElement) && document.activeElement.matches("input, select"))) return;
+  if (quiet && (busy || dirty || (box.contains(document.activeElement) && document.activeElement.matches("input, select")))) return;
   try {
     const r = await fetch(at("api/qubi"), { headers: { accept: "application/json" }, credentials: "same-origin" });
     if (!r.ok) throw new Error(String(r.status));
@@ -42,6 +43,7 @@ async function send(at, path, body) {
 }
 
 function draw(box, at) {
+  dirty = false;
   const d = data;
   const s = d.settings;
   const edit = d.canEdit;
@@ -95,7 +97,7 @@ function settingsCard(box, at, d) {
   const field = (label, control, hint) => h("label", { class: "field" }, h("span", null, label), control, hint ? h("small", null, hint) : null);
   const allRepos = !s.repos.length;
 
-  const form = h("form", { class: "qubi-form", onsubmit: (e) => {
+  const form = h("form", { class: "qubi-form", oninput: () => { dirty = true; }, onchange: () => { dirty = true; }, onsubmit: (e) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const chosen = f.getAll("repo");
