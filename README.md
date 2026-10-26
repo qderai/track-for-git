@@ -126,6 +126,11 @@ request adding an agent is very welcome.
 
 ## Qubi: a code reviewer on your own key
 
+<p align="center">
+  <img alt="The Qubi tab: switching Qubi on, turning on fix PRs, choosing the model and the spend cap, starting a bug hunt, and the runs and findings it records" src="docs/media/qubi.gif" width="100%">
+  <br><sub>51 seconds, the demo organisation.</sub>
+</p>
+
 Qubi is the reviewer built into Track for Git. Give it your own model API key and a GitHub App
 of yours, switch it on in the dashboard's **Qubi** tab, and it:
 
