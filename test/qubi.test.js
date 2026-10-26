@@ -302,6 +302,25 @@ test("the caps hold: nothing is spent over the week's cap, and an outside author
   assert.match(rows[1].note, /outside author: 1 reviews a week/);
 });
 
+test("\"Run now\" on an outside author's pull request counts against the outside allowance", async () => {
+  forgetQubiTokens();
+  const m = model([answer({ summary: "", findings: [] })]);
+  const outsider = [(u, i) => (i?.method ?? "GET") === "GET" && u.split("?")[0] === "https://api.github.com/repos/acme/api/pulls/7",
+    { body: { state: "open", draft: false, title: "t", body: "", author_association: "NONE", user: { login: "eve" }, head: { sha: HEAD, ref: "x", repo: { full_name: "eve/api" } }, base: { sha: BASE, ref: "main" } } }];
+  const g = github([outsider]);
+  const s = store();
+  const app = createApp({ env: env(), store: s, fetchImpl: fakeFetch([m.route, ...g.routes]) });
+  await switchOn(app, { outside_runs_week: 1 });
+  const run = async () => { await post(app, "/api/qubi/run", { kind: "pr", repo: "acme/api", pr: 7, confirm: true }); await app.scheduled(Date.now()); };
+  await run();
+  await run();
+  const rows = await s.all("SELECT status, note, author, trusted FROM qubi_jobs ORDER BY id");
+  assert.equal(rows[0].status, "done", rows[0].note);
+  assert.deepEqual([rows[0].author, rows[0].trusted], ["eve", 0], "the run is recorded as an outside author's");
+  assert.equal(rows[1].status, "capped");
+  assert.match(rows[1].note, /outside author: 1 reviews a week/);
+});
+
 test("a per-run cap too small for even one call spends nothing", async () => {
   forgetQubiTokens();
   const m = model([answer({ findings: [] })]);
