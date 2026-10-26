@@ -334,6 +334,7 @@ export default {
   "qubi.repos": "Repositories",
   "qubi.allRepos": { "one": "All watched ({n})", "other": "All watched ({n})" },
   "qubi.someRepos": "Only these",
+  "qubi.pickRepo": "Tick at least one repository, or choose All watched.",
   "qubi.allReposShort": "All of Qubi's repositories",
   "qubi.save": "Save",
   "qubi.runNow": "Run now",

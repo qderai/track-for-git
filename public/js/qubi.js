@@ -6,6 +6,7 @@
  */
 import { clear, h, icon } from "./dom.js";
 import { ago, dateTime, num, t } from "./i18n.js";
+import { qubiRepos } from "./lib.js";
 
 const MARK = { critical: "sev-critical", high: "sev-high", medium: "sev-medium", low: "sev-low" };
 const money = (n) => { const v = Number(n || 0); return `$${v > 0 && v < 0.1 ? v.toFixed(3) : v.toFixed(2)}`; };
@@ -97,16 +98,20 @@ function settingsCard(box, at, d) {
   const field = (label, control, hint) => h("label", { class: "field" }, h("span", null, label), control, hint ? h("small", null, hint) : null);
   const allRepos = !s.repos.length;
 
+  const pickNote = h("p", { class: "note warn", role: "alert" }, t("qubi.pickRepo"));
+  pickNote.hidden = true;
   const form = h("form", { class: "qubi-form", oninput: () => { dirty = true; }, onchange: () => { dirty = true; }, onsubmit: (e) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    const chosen = f.getAll("repo");
+    const repos = qubiRepos(f.get("scope"), f.getAll("repo"));
+    pickNote.hidden = repos !== null;
+    if (repos === null) { pickNote.scrollIntoView?.({ block: "nearest" }); return; }
     const patch = {
       triggers: { pr: f.has("pr"), push: f.has("push") }, fix_prs: f.has("fix_prs"), post_clean: f.has("post_clean"),
       model: f.get("model"), hunt_model: f.get("hunt_model"), effort: f.get("effort"), min_severity: f.get("min_severity"),
       per_run_usd: Number(f.get("per_run_usd")), weekly_usd: Number(f.get("weekly_usd")),
       outside_runs_week: Number(f.get("outside_runs_week")), outside_weekly_usd: Number(f.get("outside_weekly_usd")), quiet_minutes: Number(f.get("quiet_minutes")),
-      repos: f.get("scope") === "all" ? [] : chosen,
+      repos,
       hunt: { every: f.get("every"), at: f.get("at"), day: Number(f.get("day")), tz: String(f.get("tz") ?? "").trim() },
     };
     save(box, at, patch);
@@ -135,7 +140,8 @@ function settingsCard(box, at, d) {
     h("fieldset", { class: "wide" }, h("legend", null, t("qubi.repos")),
       h("label", { class: "check" }, h("input", { type: "radio", name: "scope", value: "all", checked: allRepos, disabled: off }), h("span", null, t("qubi.allRepos", { n: d.repos.length }))),
       h("label", { class: "check" }, h("input", { type: "radio", name: "scope", value: "some", checked: !allRepos, disabled: off }), h("span", null, t("qubi.someRepos"))),
-      h("div", { class: "repo-list" }, d.repos.map((r) => h("label", { class: "check" }, h("input", { type: "checkbox", name: "repo", value: r, checked: allRepos || s.repos.includes(r), disabled: off }), h("span", { class: "mono" }, r))))),
+      h("div", { class: "repo-list" }, d.repos.map((r) => h("label", { class: "check" }, h("input", { type: "checkbox", name: "repo", value: r, checked: allRepos || s.repos.includes(r), disabled: off }), h("span", { class: "mono" }, r)))),
+      pickNote),
     d.canEdit ? h("p", { class: "actions" }, h("button", { type: "submit", class: "btn" }, t("qubi.save"))) : null);
 
   return h("section", { class: "card", "aria-labelledby": "h-qubi-set" }, h("header", { class: "card-head" }, h("h2", { id: "h-qubi-set" }, t("qubi.settings"))), form);

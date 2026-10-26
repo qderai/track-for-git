@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { duration, setLocale, t } from "../public/js/i18n.js";
-import { apiQuery, clusterMarkers, heatStep, initials, paramsFromState, parsePatch, slotOf, stackOf, stateFromParams } from "../public/js/lib.js";
+import { apiQuery, clusterMarkers, heatStep, initials, paramsFromState, qubiRepos, parsePatch, slotOf, stackOf, stateFromParams } from "../public/js/lib.js";
 import en from "../public/locales/en.js";
 
 test("each agent keeps its colour whatever else is on screen; other agents share one", () => {
@@ -59,4 +59,11 @@ test("words: placeholders, plurals, and every message has its placeholders", () 
     const forms = typeof v === "string" ? [v] : Object.values(v);
     for (const f of forms) assert.ok(!/\{\s|\s\}/.test(f), `${k}: malformed placeholder`);
   }
+});
+
+test("Qubi's \"Only these\" with no repository ticked is not sent: an empty list means all watched repositories", () => {
+  assert.deepEqual(qubiRepos("all", ["acme/api"]), []);
+  assert.deepEqual(qubiRepos("some", ["acme/api"]), ["acme/api"]);
+  assert.equal(qubiRepos("some", []), null);
+  assert.ok(en["qubi.pickRepo"]);
 });
