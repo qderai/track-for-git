@@ -14,7 +14,7 @@
 import { getState, setState } from "../db.js";
 import { json } from "../http.js";
 import { repoMatcher } from "../sync.js";
-import { githubMode, qubiGitHub } from "./github.js";
+import { githubMode, qubiGitHub, READ } from "./github.js";
 import { providerOf } from "./providers/index.js";
 import { RunError, runJob } from "./review.js";
 import {
@@ -24,6 +24,12 @@ import {
 
 const SHA = /^[0-9a-f]{40}$/;
 const OURS = /^qubi\//;
+
+/** Pure. From inside the organisation and from a branch of this repository: trusted. A fork, or a stranger: an allowance of its own. */
+function isTrusted(repo, pr) {
+  const sameRepo = String(pr.head?.repo?.full_name ?? "").toLowerCase() === repo;
+  return sameRepo && ["OWNER", "MEMBER", "COLLABORATOR"].includes(pr.author_association);
+}
 
 /** Pure. What a webhook delivery asks Qubi to do: a job to queue, or why not. */
 export function webhookJob(event, p) {
@@ -44,8 +50,7 @@ export function webhookJob(event, p) {
     if (!SHA.test(String(pr.head?.sha)) || !Number.isInteger(pr.number)) return { kind: "none", why: "no head" };
     const sameRepo = String(pr.head?.repo?.full_name ?? "").toLowerCase() === repo;
     if (sameRepo && OURS.test(String(pr.head?.ref ?? ""))) return { kind: "none", why: "Qubi's own fix PR" };
-    // From inside the organisation and from a branch of this repository: trusted. A fork, or a stranger: an allowance of its own.
-    const trusted = sameRepo && ["OWNER", "MEMBER", "COLLABORATOR"].includes(pr.author_association);
+    const trusted = isTrusted(repo, pr);
     return { kind: "pr", repo, pr: pr.number, head: pr.head.sha, title: String(pr.title ?? ""), author: String(pr.user?.login ?? "").toLowerCase(), trusted };
   }
   return { kind: "none", why: `event ${event}` };
@@ -106,6 +111,17 @@ export function createQubi({ cfg, store, fetchImpl }) {
     // "Run now" runs while the automatic reviews are off; never past a pause or a cap.
     const gate = mayRun(manual ? { ...s, enabled: true } : s, (await spend(store, now)).week, now);
     if (!gate.ok) return finishJob(store, job.id, { status: s.enabled || manual ? "capped" : "skipped", note: gate.why }, now);
+    if (job.kind === "pr" && manual && job.trusted) {
+      // "Run now" is queued before anyone knows who wrote the pull request: look it up, so an outside author's counts too.
+      try {
+        const g = gh();
+        const pr = await g.gh(`/repos/${job.repo}/pulls/${job.pr}`, await g.token(job.repo, READ));
+        job = { ...job, author: String(pr.user?.login ?? "").toLowerCase(), trusted: isTrusted(job.repo, pr) ? 1 : 0 };
+        await store.run("UPDATE qubi_jobs SET author = ?, trusted = ? WHERE id = ?", job.author, job.trusted, job.id);
+      } catch (e) {
+        return finishJob(store, job.id, { status: "failed", note: String(e?.message ?? e).slice(0, 300) }, Date.now());
+      }
+    }
     if (job.kind === "pr" && !job.trusted) {
       const o = outsideOk(s, await outsideUsage(store, job.author ?? "", now, job.id));
       if (!o.ok) return finishJob(store, job.id, { status: "capped", note: o.why }, now);
