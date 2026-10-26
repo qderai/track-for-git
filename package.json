@@ -1,21 +1,46 @@
 {
   "name": "track-for-git",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "description": "A calm, real-time dashboard of your organisation's GitHub activity: every commit, push and pull request, who made it (and with which AI agent), what changed and what shipped. Self-hosted on Cloudflare Workers + D1, or Node.",
   "type": "module",
   "exports": {
     ".": "./src/app.js",
-    "./embed": { "types": "./src/embed.d.ts", "default": "./src/embed.js" },
+    "./embed": {
+      "types": "./src/embed.d.ts",
+      "default": "./src/embed.js"
+    },
     "./src/*": "./src/*",
     "./server/*": "./server/*",
     "./package.json": "./package.json"
   },
-  "files": ["src", "public", "migrations", "server", "docs/setup.md", "LICENSE", "NOTICE", "README.md"],
+  "files": [
+    "src",
+    "public",
+    "migrations",
+    "server",
+    "docs/setup.md",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
   "license": "Apache-2.0",
   "author": "Qder AI (https://qder.ai)",
-  "repository": { "type": "git", "url": "git+https://github.com/qderai/track-for-git.git" },
-  "keywords": ["github", "dashboard", "commits", "pull-requests", "engineering-metrics", "ai-agents", "cloudflare-workers", "d1", "self-hosted"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qderai/track-for-git.git"
+  },
+  "keywords": [
+    "github",
+    "dashboard",
+    "commits",
+    "pull-requests",
+    "engineering-metrics",
+    "ai-agents",
+    "cloudflare-workers",
+    "d1",
+    "self-hosted"
+  ],
   "scripts": {
     "test": "node --test test/*.test.js",
     "demo": "node server/demo.js",
@@ -29,22 +54,54 @@
   },
   "cloudflare": {
     "bindings": {
-      "GITHUB_ORG": { "description": "Your GitHub organisation's login, for example `acme`. Leave empty with `DEMO=1`." },
-      "AUTH": { "description": "Who may open the dashboard: `access` (Cloudflare Access, recommended), `github` (members of the organisation sign in with GitHub) or `none` (only for a private network or the demo)." },
-      "DEMO": { "description": "`1` shows a made-up organisation so you can try it before connecting GitHub. Remove it when you connect yours." },
-      "GITHUB_APP_ID": { "description": "Your GitHub App's ID (recommended; read-only). See [docs/setup.md](https://github.com/qderai/track-for-git/blob/main/docs/setup.md)." },
-      "GITHUB_APP_PRIVATE_KEY": { "description": "The App's private key (the whole `.pem` file)." },
-      "GITHUB_TOKEN": { "description": "Instead of an App: a fine-grained token, read-only (Contents, Metadata, Pull requests, Deployments, Commit statuses; Members for teams)." },
-      "GITHUB_WEBHOOK_SECRET": { "description": "The secret of the webhook (App or organisation), for real-time updates. A long random string." },
-      "GITHUB_OAUTH_CLIENT_ID": { "description": "With `AUTH=github`: the OAuth client ID (the GitHub App's own works)." },
-      "GITHUB_OAUTH_CLIENT_SECRET": { "description": "With `AUTH=github`: the OAuth client secret." },
-      "SESSION_SECRET": { "description": "With `AUTH=github`: 32+ random characters that sign the session cookie." },
-      "ACCESS_TEAM_DOMAIN": { "description": "With `AUTH=access`: your Zero Trust team domain, for example `acme.cloudflareaccess.com`." },
-      "ACCESS_AUD": { "description": "With `AUTH=access`: the Application Audience (AUD) tag of the Access application." },
-      "QUBI_API_KEY": { "description": "Optional, for Qubi (the reviewer): your own Claude API key. Qubi stays off until you switch it on in the dashboard." },
-      "QUBI_GITHUB_APP_ID": { "description": "For Qubi: the ID of a second GitHub App of yours that may comment and open pull requests (see the README's Qubi section)." },
-      "QUBI_GITHUB_APP_PRIVATE_KEY": { "description": "For Qubi: that App's private key (the whole `.pem` file)." },
-      "QUBI_ADMINS": { "description": "For Qubi: who may change its settings and start paid runs, GitHub logins or emails, comma-separated." }
+      "GITHUB_ORG": {
+        "description": "Your GitHub organisation's login, for example `acme`. Leave empty with `DEMO=1`."
+      },
+      "AUTH": {
+        "description": "Who may open the dashboard: `access` (Cloudflare Access, recommended), `github` (members of the organisation sign in with GitHub) or `none` (only for a private network or the demo)."
+      },
+      "DEMO": {
+        "description": "`1` shows a made-up organisation so you can try it before connecting GitHub. Remove it when you connect yours."
+      },
+      "GITHUB_APP_ID": {
+        "description": "Your GitHub App's ID (recommended; read-only). See [docs/setup.md](https://github.com/qderai/track-for-git/blob/main/docs/setup.md)."
+      },
+      "GITHUB_APP_PRIVATE_KEY": {
+        "description": "The App's private key (the whole `.pem` file)."
+      },
+      "GITHUB_TOKEN": {
+        "description": "Instead of an App: a fine-grained token, read-only (Contents, Metadata, Pull requests, Deployments, Commit statuses; Members for teams)."
+      },
+      "GITHUB_WEBHOOK_SECRET": {
+        "description": "The secret of the webhook (App or organisation), for real-time updates. A long random string."
+      },
+      "GITHUB_OAUTH_CLIENT_ID": {
+        "description": "With `AUTH=github`: the OAuth client ID (the GitHub App's own works)."
+      },
+      "GITHUB_OAUTH_CLIENT_SECRET": {
+        "description": "With `AUTH=github`: the OAuth client secret."
+      },
+      "SESSION_SECRET": {
+        "description": "With `AUTH=github`: 32+ random characters that sign the session cookie."
+      },
+      "ACCESS_TEAM_DOMAIN": {
+        "description": "With `AUTH=access`: your Zero Trust team domain, for example `acme.cloudflareaccess.com`."
+      },
+      "ACCESS_AUD": {
+        "description": "With `AUTH=access`: the Application Audience (AUD) tag of the Access application."
+      },
+      "QUBI_API_KEY": {
+        "description": "Optional, for Qubi (the reviewer): your own Claude API key. Qubi stays off until you switch it on in the dashboard."
+      },
+      "QUBI_GITHUB_APP_ID": {
+        "description": "For Qubi: the ID of a second GitHub App of yours that may comment and open pull requests (see the README's Qubi section)."
+      },
+      "QUBI_GITHUB_APP_PRIVATE_KEY": {
+        "description": "For Qubi: that App's private key (the whole `.pem` file)."
+      },
+      "QUBI_ADMINS": {
+        "description": "For Qubi: who may change its settings and start paid runs, GitHub logins or emails, comma-separated."
+      }
     }
   },
   "dependencies": {
@@ -53,5 +110,7 @@
   "devDependencies": {
     "wrangler": "4.151.1"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.13"
+  }
 }
