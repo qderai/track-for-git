@@ -124,6 +124,73 @@ The six most common agents keep fixed colours, so a colour always means the same
 in the charts but keep their own names everywhere else. The rules are in [`src/agents.js`](src/agents.js): a pull
 request adding an agent is very welcome.
 
+## Qubi: a code reviewer on your own key
+
+Qubi is the reviewer built into Track for Git. Give it your own model API key and a GitHub App
+of yours, switch it on in the dashboard's **Qubi** tab, and it:
+
+- **reviews every pull request** and **every push to the default branch** (after the branch has been quiet for a few
+  minutes, so a burst of pushes is one review), and posts a review with a comment on each line it found a bug on;
+- **runs bug hunts** over a whole repository, or one folder of it, on a schedule (daily or weekly) or from *Run now*;
+- **opens a pull request with the fix** for a finding it is sure of, when you turn that on (it is off by default).
+  Nothing is merged, and nothing is run: a person reviews the fix.
+
+It stays quiet about style. The prompt ([`src/qubi/prompt.js`](src/qubi/prompt.js)) asks for bugs and security holes
+only, each with the file and line, a concrete failing input, what goes wrong, the fix and a severity, and tells the
+model to read the callers and the validation in front of the code before it reports anything, to drop what it cannot
+show a failing case for, and that finding nothing is a good result. Every finding must then quote its line word for
+word: Qubi looks the quote up in the file at the reviewed commit and leaves out any finding whose quote is not there
+(it also moves a finding to the right line when the model's line number was off). The review says how many it left
+out.
+
+**Money.** Every run has a cap, and so does every 7 days; pull requests from outside the organisation (forks,
+strangers) have a smaller allowance of their own, per author and in total. The caps are checked on the server before
+any run starts, each call to the model is limited to what the run's cap has left, and the cost is recorded after every
+call, so a run that fails still counts. You set the caps in the dashboard, and the ceilings they cannot pass in the
+environment (`QUBI_MAX_RUN_USD`, `QUBI_MAX_WEEK_USD`). With the defaults (Claude Haiku 5.5 for reviews, $0.25 a run,
+$5 a week) a typical pull request review costs about a cent.
+
+**What it can touch.** The model gets three tools: read a file, list a folder, and search the code, all at the
+reviewed commit. With a GitHub App, they read through a token minted for that one repository with read permissions
+only; posting the review, and opening a fix PR, use a second token after the model is done. Text from the pull
+request (its title, description, diff and code) reaches the model as material to review, never as instructions, and
+outside authors never get a fix PR. These measures reduce the room for prompt injection; they do not make a model's
+judgement infallible, so treat Qubi's findings and fixes as a reviewer's suggestions.
+
+**Set it up** (the details are in [docs/setup.md](docs/setup.md#6-qubi-the-reviewer-optional)):
+
+```sh
+npx wrangler d1 migrations apply DB --remote      # migration 0002 adds Qubi's tables (npm run deploy does this)
+npx wrangler secret put QUBI_API_KEY              # your Claude API key
+npx wrangler secret put QUBI_GITHUB_APP_ID        # a second GitHub App: Contents and Pull requests read & write
+npx wrangler secret put QUBI_GITHUB_APP_PRIVATE_KEY
+npx wrangler secret put QUBI_ADMINS               # who may change Qubi and start paid runs: logins or emails
+```
+
+Qubi uses the dashboard's own webhook (pushes and pull requests), so its App needs no webhook of its own. The key is
+never shown in the page, in the API or in a log; the Qubi tab shows only whether it is set.
+
+**Which model.** `QUBI_PROVIDER` picks the API, and the key is `QUBI_API_KEY` (or the provider's usual variable):
+
+| `QUBI_PROVIDER` | API | Models and prices |
+|---|---|---|
+| `anthropic` (default) | Claude API | Built in: Claude Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1 |
+| `openai` | OpenAI | You name them in `QUBI_MODELS` |
+| `xai` | xAI (Grok) | `QUBI_MODELS` |
+| `gemini` | Google Gemini (its OpenAI-compatible endpoint) | `QUBI_MODELS` |
+| `mistral`, `deepseek`, `groq` | Mistral, DeepSeek, Groq | `QUBI_MODELS` |
+| `openrouter` | OpenRouter: many providers behind one key | `QUBI_MODELS` |
+| `openai-compatible` | Anything else with OpenAI's Chat Completions: Ollama, vLLM, LM Studio, a gateway (`QUBI_API_URL`) | `QUBI_MODELS` |
+
+`QUBI_MODELS` lists each model with its price in US dollars per million tokens, input/output and optionally cached
+input, for example (made-up names and prices) `QUBI_MODELS="model-large:3/15, model-small:0.3/0.5/0.075"`. The first is the default for reviews, the second for bug
+hunts; a local model is free (`llama3:0/0`). Qubi does not run without prices, because the caps are only as good as
+they are. Copy them from your provider's price page and update them when it changes.
+
+Cursor has no model API of its own to point Qubi at (inside Cursor, "your own key" means Cursor calling your
+provider), so it is not a `QUBI_PROVIDER`. Another API fits in one file ([`src/qubi/providers/`](src/qubi/providers/index.js)):
+a pull request adding one is welcome.
+
 ## How it works
 
 ```
@@ -151,7 +218,8 @@ GitHub ◀──GraphQL + REST, read-only, every minute──┘        └─�
 ## Security and privacy
 
 - Read-only GitHub permissions. The only POSTs to GitHub are GraphQL queries, the App's token exchange and the
-  sign-in's code exchange.
+  sign-in's code exchange. Qubi, the optional reviewer, writes (reviews, comments and, when allowed, fix PRs) through
+  a GitHub App of its own, never through the dashboard's credentials.
 - The dashboard **refuses to show any data until you choose who may open it** (`AUTH`). With Cloudflare Access, the
   Worker also verifies Access's signed token on every API request. With GitHub sign-in, membership is checked with the
   dashboard's own credentials, and the person's GitHub token is dropped after sign-in.

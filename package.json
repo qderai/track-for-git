@@ -40,8 +40,15 @@
       "GITHUB_OAUTH_CLIENT_SECRET": { "description": "With `AUTH=github`: the OAuth client secret." },
       "SESSION_SECRET": { "description": "With `AUTH=github`: 32+ random characters that sign the session cookie." },
       "ACCESS_TEAM_DOMAIN": { "description": "With `AUTH=access`: your Zero Trust team domain, for example `acme.cloudflareaccess.com`." },
-      "ACCESS_AUD": { "description": "With `AUTH=access`: the Application Audience (AUD) tag of the Access application." }
+      "ACCESS_AUD": { "description": "With `AUTH=access`: the Application Audience (AUD) tag of the Access application." },
+      "QUBI_API_KEY": { "description": "Optional, for Qubi (the reviewer): your own Claude API key. Qubi stays off until you switch it on in the dashboard." },
+      "QUBI_GITHUB_APP_ID": { "description": "For Qubi: the ID of a second GitHub App of yours that may comment and open pull requests (see the README's Qubi section)." },
+      "QUBI_GITHUB_APP_PRIVATE_KEY": { "description": "For Qubi: that App's private key (the whole `.pem` file)." },
+      "QUBI_ADMINS": { "description": "For Qubi: who may change its settings and start paid runs, GitHub logins or emails, comma-separated." }
     }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0"
   },
   "devDependencies": {
     "wrangler": "4.151.1"

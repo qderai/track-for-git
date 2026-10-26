@@ -31,7 +31,8 @@ export function fakeFetch(routes) {
       if (typeof match === "string" ? u.includes(match) : match(u, init)) {
         const r = typeof res === "function" ? res(u, init) : res;
         const headers = new Headers({ "content-type": "application/json", "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4900", "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600), ...(r.headers ?? {}) });
-        return new Response(r.status === 304 || r.status === 204 ? null : JSON.stringify(r.body ?? {}), { status: r.status ?? 200, headers });
+        // `text` is sent as it is (a raw file), `body` as JSON.
+        return new Response(r.status === 304 || r.status === 204 ? null : r.text ?? JSON.stringify(r.body ?? {}), { status: r.status ?? 200, headers });
       }
     }
     return new Response(JSON.stringify({ message: "Not Found" }), { status: 404, headers: { "content-type": "application/json" } });

@@ -9,6 +9,7 @@
  *   GET  /api/me                    who is signed in, and what the page should show first
  *   GET  /api/overview | /api/heatmap | /api/story | /api/facets | /api/status
  *   GET  /api/commits[/:repo/:sha] | /api/pushes | /api/prs[/:repo/:number]
+ *   GET  /api/qubi, POST /api/qubi/settings | /api/qubi/run     Qubi, the reviewer (src/qubi/), when it is set up
  */
 import { accessUser, oauthCallback, oauthStart, sessionUser, signOut } from "./auth.js";
 import { authProblem, readConfig, setupState } from "./config.js";
@@ -17,6 +18,7 @@ import { demoFiles, demoTick, ensureDemo } from "./demo.js";
 import { commitFiles, prFiles, shapeFiles } from "./diff.js";
 import { GitHubError, RateLimited, createGitHub } from "./github/client.js";
 import { json, makeCache, text } from "./http.js";
+import { createQubi } from "./qubi/index.js";
 import { commitPage, commitRow, facets, heatmap, liveNow, overview, parseFilter, prPage, prRowOut, pushPage, story } from "./queries.js";
 import { runSync } from "./sync.js";
 import { ingest, readBody, verifySignature } from "./webhook.js";
@@ -57,6 +59,8 @@ export function createApp(platform) {
   // Its own corner of a shared cache: two dashboards in one Worker (two bases, two organisations) never see each other's.
   const cache = platform.cache ?? makeCache(platform.edgeCache ?? null, 400, `${cfg.base}|${cfg.demo ? "~demo" : cfg.org}`);
   const demoScale = Number(platform.env.DEMO_SCALE) > 0 ? Math.min(Number(platform.env.DEMO_SCALE), 3) : 1;
+
+  const qubi = createQubi({ cfg, store, fetchImpl });
 
   const github = async (maxRequests = 12) => createGitHub(cfg, { fetchImpl, rate: (await getJson(store, "rate")) ?? {}, maxRequests });
 
@@ -213,8 +217,11 @@ export function createApp(platform) {
     if (!(await verifySignature(cfg.webhookSecrets, raw, req.headers.get("x-hub-signature-256")))) return json({ error: "bad signature" }, 401);
     let payload;
     try { payload = JSON.parse(new TextDecoder().decode(raw)); } catch { return json({ error: "Set the webhook's content type to application/json" }, 400); }
-    const did = await ingest({ store, cfg }, String(req.headers.get("x-github-event") ?? ""), req.headers.get("x-github-delivery"), payload, now);
-    return json({ ok: true, did });
+    const event = String(req.headers.get("x-github-event") ?? "");
+    const did = await ingest({ store, cfg }, event, req.headers.get("x-github-delivery"), payload, now);
+    // Qubi only queues here (the minute tick reviews); a delivery GitHub sends twice is queued once.
+    const reviewer = did === "duplicate" ? null : await qubi.onWebhook(event, payload, now).catch((e) => { console.warn("[track-for-git] qubi:", String(e?.message ?? e).slice(0, 200)); return "error"; });
+    return json({ ok: true, did, ...(reviewer ? { qubi: reviewer } : {}) });
   }
 
   return {
@@ -235,7 +242,8 @@ export function createApp(platform) {
         }
         if (p === "/auth/logout") return req.method === "POST" ? signOut(cfg) : json({ error: "POST only" }, 405);
         if (!p.startsWith("/api/")) return json({ error: "not_found" }, 404);
-        if (req.method !== "GET") return json({ error: "GET only" }, 405);
+        const qubiPath = p === "/api/qubi" || p.startsWith("/api/qubi/");
+        if (req.method !== "GET" && !(qubiPath && req.method === "POST")) return json({ error: "GET only" }, 405);
 
         const who = await whoIs(req);
         if (p === "/api/me") {
@@ -244,10 +252,11 @@ export function createApp(platform) {
           if (cfg.demo) await ensureDemo(store, now, { scale: demoScale });
           return json({ title: cfg.title, org: cfg.demo ? "acme" : cfg.org || null, demo: cfg.demo, auth: cfg.auth || "none", user: who.user.id,
             staleDays: cfg.staleDays, mode: cfg.mode, webUrl: cfg.demo ? null : cfg.webUrl, timeZone: cfg.timeZone || null,
-            agents: cfg.agents.map((a) => ({ id: a.id, name: a.name })) });
+            agents: cfg.agents.map((a) => ({ id: a.id, name: a.name })), qubi: qubi.visible });
         }
         if (who.problem) return json({ error: "setup", problem: who.problem }, 503);
         if (who.signIn) return json({ error: "signin", signIn: cfg.auth === "github" ? `${cfg.base}auth/login` : null }, 401);
+        if (qubiPath) return qubi.visible ? await qubi.api(req, url, who.user, now) : json({ error: "not_found" }, 404);
         if (cfg.demo) {
           await ensureDemo(store, now, { scale: demoScale });
           waitUntil(demoTick(store, now));
@@ -258,11 +267,13 @@ export function createApp(platform) {
         return json({ error: "server", detail: "Something went wrong; the server log has the details." }, 500);
       }
     },
-    /** The cron trigger: one sync run (nothing in demo mode). */
+    /** The cron trigger: one sync run (nothing in demo mode) and, beside it, Qubi's tick (nothing until it is set up). */
     async scheduled(now = Date.now()) {
-      if (cfg.demo || cfg.mode === "none") return { skipped: true };
+      const reviewer = qubi.tick(now).catch((e) => ({ error: String(e?.message ?? e).slice(0, 300) }));
+      if (cfg.demo || cfg.mode === "none") return { skipped: true, qubi: await reviewer };
       const gh = createGitHub(cfg, { fetchImpl, rate: (await getJson(store, "rate")) ?? {}, maxRequests: cfg.maxRequests });
-      return runSync({ store, cfg, gh }, now);
+      const [sync, q] = await Promise.all([runSync({ store, cfg, gh }, now), reviewer]);
+      return { ...sync, qubi: q };
     },
   };
 }

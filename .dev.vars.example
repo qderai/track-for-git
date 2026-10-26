@@ -12,3 +12,13 @@ GITHUB_WEBHOOK_SECRET=
 GITHUB_OAUTH_CLIENT_ID=
 GITHUB_OAUTH_CLIENT_SECRET=
 SESSION_SECRET=
+
+# Qubi, the reviewer (optional; README, docs/setup.md step 6). Your own model key, and a second GitHub App that may
+# comment and open pull requests (Contents and Pull requests, read and write). Nothing runs until it is switched on.
+QUBI_API_KEY=
+QUBI_GITHUB_APP_ID=
+QUBI_GITHUB_APP_PRIVATE_KEY=
+# Or instead of Qubi's App: a fine-grained token with the same permissions.
+QUBI_GITHUB_TOKEN=
+# Who may change Qubi's settings and start paid runs: GitHub logins or emails, comma-separated.
+QUBI_ADMINS=

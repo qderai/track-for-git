@@ -86,6 +86,7 @@
       <button type="button" role="tab" id="t-commits" data-tab="commits" aria-controls="p-commits" data-t="tabs.commits">Commits</button>
       <button type="button" role="tab" id="t-prs" data-tab="prs" aria-controls="p-prs" data-t="tabs.prs">Pull requests</button>
       <button type="button" role="tab" id="t-story" data-tab="story" aria-controls="p-story" data-t="tabs.story">Story</button>
+      <button type="button" role="tab" id="t-qubi" data-tab="qubi" aria-controls="p-qubi" data-t="tabs.qubi" hidden>Qubi</button>
     </nav>
 
     <main id="main" tabindex="-1">
@@ -179,6 +180,8 @@
         <header class="story-head"><h2 data-t="story.title">What happened</h2><p data-t="story.sub"></p></header>
         <div id="story" class="story"></div>
       </section>
+
+      <section id="p-qubi" role="tabpanel" aria-labelledby="t-qubi" class="panel" hidden></section>
     </main>
 
     <footer class="foot">

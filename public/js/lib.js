@@ -70,7 +70,7 @@ export const FILTER_KEYS = ["repos", "team", "author", "agent", "branch", "path"
 /** Pure. The page's state from a URL's search params (only known keys, only sane values). */
 export function stateFromParams(params) {
   const get = (k) => params.get(k) ?? "";
-  const tab = ["overview", "commits", "prs", "story"].includes(get("tab")) ? get("tab") : "overview";
+  const tab = ["overview", "commits", "prs", "story", "qubi"].includes(get("tab")) ? get("tab") : "overview";
   return {
     tab,
     range: ["1d", "7d", "30d", "90d"].includes(get("range")) ? get("range") : "7d",

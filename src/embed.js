@@ -8,11 +8,12 @@
  *   const code = mount({ base: "/tools/code/", env: settings, store: d1Store(env.CODE_DB), frameAncestors: "'self'" });
  *   const res = await code.fetch(request);   // a Response for a path under base, null for anything else
  *   await code.webhook(request);              // GitHub's deliveries, at whatever address the app receives them
- *   await code.scheduled(Date.now());         // the sync, from the app's own cron (once a minute)
+ *   await code.scheduled(Date.now());         // the sync (and Qubi, when set up), from the app's own cron (once a minute)
  *
- * `env` takes the same settings as a deployment of its own (README, docs/setup.md). Who may open it is still
- * Track for Git's AUTH: `access` checks Cloudflare Access's token itself; `none` only when the app's own sign-in
- * already stands in front of every path under base.
+ * `env` takes the same settings as a deployment of its own (README, docs/setup.md), Qubi's included: with no QUBI_*
+ * setting it stays out of sight. Apply every file of migrations/ to the database, 0002_qubi.sql too. Who may open
+ * it is still Track for Git's AUTH: `access` checks Cloudflare Access's token itself; `none` only when the app's own
+ * sign-in already stands in front of every path under base.
  * `hooks.markers({ from, to })` adds deploys that are not GitHub Deployments (from the app's own pipeline) and
  * `hooks.live()` says what runs now (the "Live now" tile); src/embed.d.ts has their shapes.
  */

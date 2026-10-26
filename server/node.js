@@ -74,7 +74,10 @@ export function start(env = process.env) {
   const port = Number(env.PORT || 8787);
   server.listen(port, env.HOST || "0.0.0.0", () => console.log(`Track for Git on http://localhost:${port}${app.cfg.demo ? " (demo)" : ""}`));
   // The sync once a minute, as the cron trigger does on Workers.
-  const tick = () => app.scheduled(Date.now()).then((r) => { if (r?.errors?.length) console.warn("[track-for-git] sync:", r.errors.join("; ")); }).catch((e) => console.error("[track-for-git] sync", e));
+  const tick = () => app.scheduled(Date.now()).then((r) => {
+    if (r?.errors?.length) console.warn("[track-for-git] sync:", r.errors.join("; "));
+    if (r?.qubi?.error) console.warn("[track-for-git] qubi:", r.qubi.error);
+  }).catch((e) => console.error("[track-for-git] sync", e));
   const timer = setInterval(tick, 60_000);
   setTimeout(tick, 2_000);
   return { server, close: () => { clearInterval(timer); server.close(); db.close(); } };

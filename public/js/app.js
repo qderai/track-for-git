@@ -11,6 +11,7 @@ import { $, $$, clear, h, hideTip, icon, initTooltips, pref, setPref } from "./d
 import { ago, dateTime, dayAfter, dayStart, dayWords, duration, num, pct, setLocale, setTimeZone, signed, t, timeZone } from "./i18n.js";
 import { apiQuery, initials, paramsFromState, stateFromParams, whoOf } from "./lib.js";
 import { closePicker, openPicker } from "./picker.js";
+import { loadQubi } from "./qubi.js";
 import { VirtualList } from "./virtual-list.js";
 
 setLocale();
@@ -87,6 +88,9 @@ async function boot() {
   $("#banner").hidden = !(me.demo || me.auth === "none");
   $("#banner").textContent = me.demo ? t("demo.banner") : t("open.banner");
   $("#signout").hidden = me.auth !== "github";
+  // Qubi's tab, when Qubi is set up here (or in the demo).
+  $("#t-qubi").hidden = !me.qubi;
+  if (!me.qubi && state.tab === "qubi") state = { ...state, tab: "overview" };
   get("api/facets").then((f) => { facets = f; for (const a of f.agents) names[a.id] ??= a.name; for (const r of f.repos) repoName.set(String(r.id), r.name); drawFilters(); }).catch(() => undefined);
   status();
   render();
@@ -195,11 +199,12 @@ function initToolbar() {
   for (const tab of tabs) {
     tab.addEventListener("click", () => setState({ tab: tab.dataset.tab, sel: "" }, { push: true }));
     tab.addEventListener("keydown", (e) => {
-      const i = tabs.indexOf(tab);
-      const j = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
+      const shown = tabs.filter((x) => !x.hidden);
+      const i = shown.indexOf(tab);
+      const j = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? shown.length - 1 : null;
       if (j === null) return;
       e.preventDefault();
-      const next = tabs[(j + tabs.length) % tabs.length];
+      const next = shown[(j + shown.length) % shown.length];
       next.focus();
       setState({ tab: next.dataset.tab, sel: "" }, { push: true });
     });
@@ -241,6 +246,7 @@ function render() {
   if (state.tab === "overview") loadOverview();
   else if (state.tab === "commits") loadCommits();
   else if (state.tab === "prs") loadPrs();
+  else if (state.tab === "qubi") loadQubi($("#p-qubi"), at);
   else loadStory();
 }
 
@@ -662,6 +668,7 @@ function tick() {
   if (state.tab === "overview") loadOverview();
   else if (state.tab === "commits") loadCommits({ refresh: true });
   else if (state.tab === "prs") loadPrs({ refresh: true });
+  else if (state.tab === "qubi") loadQubi($("#p-qubi"), at, { quiet: true });
 }
 setInterval(tick, 15_000);
 setInterval(() => { if (document.visibilityState === "visible" && me && !me.setup) status(); }, 30_000);

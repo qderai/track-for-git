@@ -10,6 +10,7 @@
  */
 import { detectAgent } from "./agents.js";
 import { chunks, getState, setState } from "./db.js";
+import { qubiDemoStmts } from "./qubi/demo.js";
 import { DAY, HOUR } from "./time.js";
 
 /** A small, seeded random generator (mulberry32): the same demo every time. */
@@ -294,6 +295,8 @@ export async function ensureDemo(store, now = Date.now(), { scale = 1 } = {}) {
   await store.batch(inserts("prs", PR_COLS, g.prs));
   await store.batch(inserts("ci", ["repo_id", "sha", "state", "at"], g.ci));
   await store.batch(inserts("markers", MARKER_COLS, g.markers));
+  // Qubi's made-up runs; a database without migration 0002 still gets the rest of the demo.
+  await store.batch(qubiDemoStmts(g.repos, now)).catch(() => undefined);
   await setState(store, "webhook_at", String(now), now);
   await setState(store, "demo_tick", String(now), now);
   return true;

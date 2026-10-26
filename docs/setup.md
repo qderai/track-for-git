@@ -9,6 +9,7 @@ owner of the GitHub organisation, or have one at hand.
 3. [Real time: the webhook](#3-real-time-the-webhook)
 4. [Put it behind your sign-in](#4-put-it-behind-your-sign-in)
 5. [Turn the demo off](#5-turn-the-demo-off)
+6. [Qubi, the reviewer (optional)](#6-qubi-the-reviewer-optional)
 
 Every setting is listed in [the reference](#settings) at the end. Secrets are set with `npx wrangler secret put NAME`
 (Cloudflare) or in the environment (Node, Docker), and never in a file you commit. When a step asks for a random
@@ -45,7 +46,8 @@ Run it behind your reverse proxy with TLS. The dashboard keeps its data in one S
 
 ## 2. Connect GitHub, read-only
 
-Track for Git only reads. It never writes to GitHub, and it asks for no write permission anywhere.
+The dashboard only reads. It never writes to GitHub, and it asks for no write permission anywhere. (Qubi, the optional
+reviewer of step 6, has a GitHub App of its own for what it posts.)
 
 ### Recommended: a GitHub App
 
@@ -186,6 +188,67 @@ dashboard except through the proxy.
 Set `DEMO` to `""` (or remove it) and deploy. The first sync starts within a minute; the status pill shows it, and
 *Connection* shows what it did and how much of GitHub's hourly allowance is left.
 
+## 6. Qubi, the reviewer (optional)
+
+Qubi reviews pull requests and pushes to the default branch, runs bug hunts, and (when you allow it) opens fix PRs,
+with your own model API key. Nothing of it runs, and nothing is spent, until you set it up and switch it on in the
+dashboard's **Qubi** tab. The README's [Qubi section](../README.md#qubi-a-code-reviewer-on-your-own-key) says what it
+does and how it keeps to its caps.
+
+**1. The database.** Migration `0002_qubi.sql` adds Qubi's tables. `npm run deploy` applies it; on its own:
+`npx wrangler d1 migrations apply DB --remote`. (Node applies migrations itself when it starts.)
+
+**2. Your model key.** A key from the [Claude Console](https://platform.claude.com/), ideally in a workspace of its own
+with a spend limit, so the provider caps it too:
+
+```sh
+npx wrangler secret put QUBI_API_KEY
+```
+
+Another provider (OpenAI, xAI's Grok, Gemini, Mistral, DeepSeek, Groq, OpenRouter, or a self-hosted model): set
+`QUBI_PROVIDER` and `QUBI_MODELS` with the models' prices too, as the README's *Which model* shows. A spend limit at
+the provider is a good second line there as well.
+
+**3. Qubi's GitHub App.** A second App, apart from the dashboard's read-only one, because Qubi writes: reviews, commit
+comments and fix PRs. Open `https://github.com/organizations/YOUR-ORG/settings/apps/new` and:
+
+1. Name it, for example *Qubi (Acme)*; its name is what people see on its reviews.
+2. **Webhook:** off. Qubi reads pushes and pull requests from the dashboard's own webhook (step 3 of this guide;
+   *Push* and *Pull request* must be among its events).
+3. **Repository permissions:** Contents *Read and write*, Pull requests *Read and write* (Metadata is Read-only by
+   itself). Nothing else: Qubi never touches workflows (`.github/`).
+4. Create it, note its **App ID**, generate a private key, and install it on the repositories Qubi should review.
+
+```sh
+npx wrangler secret put QUBI_GITHUB_APP_ID
+npx wrangler secret put QUBI_GITHUB_APP_PRIVATE_KEY   # the whole .pem file
+```
+
+With an App, every token Qubi uses is minted for one repository and only the permissions that step needs; the model
+reads through a read-only one. A fine-grained token (`QUBI_GITHUB_TOKEN`, same permissions) also works, but it cannot
+be narrowed per step like that.
+
+**4. Who may change it.** Changing the settings and pressing *Run now* spend money, so only the people in
+`QUBI_ADMINS` may: GitHub logins with `AUTH=github`, emails with `AUTH=access`, comma-separated. Everyone signed in can
+see the Qubi tab. With `AUTH=none` nobody can change anything.
+
+```sh
+npx wrangler secret put QUBI_ADMINS    # or a var in wrangler.jsonc: "QUBI_ADMINS": "dana, ruth"
+```
+
+**5. Switch it on.** In the Qubi tab: check that the key and the App show as set, choose the caps (per run, per 7 days,
+and for outside authors), the models, whether to open fix PRs, and the bug-hunt schedule, then *Switch on*. Runs start
+from the minute cron; each one shows in the tab with what it cost and what it found. To stop everything at once,
+*Switch off*, or remove `QUBI_API_KEY`.
+
+**Limits to know.**
+- A review makes a few dozen requests (the model, GitHub's API). The Workers free plan allows 50 requests to outside
+  services per run, which a large review can pass: Workers Paid is better for Qubi.
+- A review reads the change and the code around it, not the whole repository; a bug hunt reads the riskiest few
+  areas, or the folder you name. Long diffs are cut in the middle, and the model reads the files it needs.
+- Findings are a reviewer's suggestions: Qubi leaves out what it cannot back up with the file's own text, but a person
+  still decides.
+
 ## Settings
 
 | Setting | Where | What |
@@ -212,6 +275,16 @@ Set `DEMO` to `""` (or remove it) and deploy. The first sync starts within a min
 | `TIME_ZONE` | var | The team's own time zone for days and hours, an IANA name (`Asia/Jerusalem`). Empty: each viewer's own. |
 | `TITLE` | var | The page title. |
 | `DEMO`, `DEMO_SCALE` | var | The made-up organisation, and how busy it is (default 1). |
+| `QUBI_API_KEY` | secret | Qubi: your model API key (`ANTHROPIC_API_KEY` works too). Not set: no Qubi. |
+| `QUBI_PROVIDER` | var | Qubi: `anthropic` (default), `openai`, `xai`, `gemini`, `mistral`, `deepseek`, `groq`, `openrouter` or `openai-compatible` (README, *Which model*). The key may also be the provider's usual variable (`OPENAI_API_KEY`, `XAI_API_KEY`, …). |
+| `QUBI_MODELS` | var | Qubi, every provider but `anthropic`: the models and their prices per million tokens, `id:input/output[/cached]`, comma-separated. Required: the caps need prices. |
+| `QUBI_API_URL` | var | Qubi: the API's address, for a gateway or `openai-compatible` (https, or http to `localhost`). Empty: the provider's own. |
+| `QUBI_ORIGIN` | var | Qubi, Node behind a proxy that rewrites `Host`: the dashboard's public address (`https://code.acme.example`), so its settings can be saved. |
+| `QUBI_GITHUB_APP_ID`, `QUBI_GITHUB_APP_PRIVATE_KEY` | secret | Qubi's own GitHub App (Contents and Pull requests, read and write). |
+| `QUBI_GITHUB_APP_INSTALLATION_ID` | var | Only when Qubi's App is installed more than once. |
+| `QUBI_GITHUB_TOKEN` | secret | Instead of Qubi's App: a fine-grained token with the same permissions. |
+| `QUBI_ADMINS` | var | Who may change Qubi's settings and start paid runs: GitHub logins or emails, comma-separated; `*` for everyone signed in. |
+| `QUBI_MAX_RUN_USD`, `QUBI_MAX_WEEK_USD` | var | The ceilings the caps set in the dashboard cannot pass. Default $2 a run, $50 a week. |
 | `PORT`, `HOST`, `DATABASE_PATH` | env | Node and Docker only. |
 
 ## Inside an app you already run

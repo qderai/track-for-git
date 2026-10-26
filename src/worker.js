@@ -21,6 +21,7 @@ export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(app(env, ctx).scheduled(Date.now()).then((r) => {
       if (r?.errors?.length) console.warn("[track-for-git] sync:", r.errors.join("; "));
+      if (r?.qubi?.error) console.warn("[track-for-git] qubi:", r.qubi.error);
     }));
   },
 };
